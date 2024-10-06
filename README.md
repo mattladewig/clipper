@@ -2,18 +2,17 @@
 
 Clipper is a Python script that processes video files by clipping segments based on keywords found in accompanying subtitle files. The script generates various outputs including clipped video, audio, subtitles, a frame image, and metadata.
 
-
 ## Features
 
 - Clips video files based on keywords found in subtitle files.
 - Configurable pre and post duration for clips.
 - Generates a new folder with clipped video files.
 - Outputs include:
-    - Clipped video (`.mp4`)
-    - Frame image (`.jpg`)
-    - Audio (`.mp3`)
-    - Subtitles (`.srt`)
-    - Metadata (`.json`)
+  - Clipped video (`.mp4`)
+  - Frame image (`.png`)
+  - Audio (`.mp3`)
+  - Subtitles (`.srt`)
+  - Metadata (`.json`)
 
 ## Functional Requirements
 
@@ -37,29 +36,30 @@ Clipper is a Python script that processes video files by clipping segments based
 18. The script should create the output folder if it does not exist.
 
 ## Dependencies
+
 ### Setting Up a Python Virtual Environment
 
 It is recommended to use a Python virtual environment to manage dependencies and avoid conflicts with other projects. Follow these steps to set up and activate a virtual environment:
 
 1. **Create a virtual environment**:
 
-    ```sh
-    python -m venv .venv
-    ```
+   ```sh
+   python -m venv .venv
+   ```
 
 2. **Activate the virtual environment**:
 
-    - On Windows:
+   - On Windows:
 
-        ```sh
-        .\.venv\Scripts\activate
-        ```
+     ```sh
+     .\.venv\Scripts\activate
+     ```
 
-    - On macOS and Linux:
+   - On macOS and Linux:
 
-        ```sh
-        source .venv/bin/activate
-        ```
+     ```sh
+     source .venv/bin/activate
+     ```
 
 3. **Install the required packages**:
 
@@ -68,19 +68,17 @@ It is recommended to use a Python virtual environment to manage dependencies and
 - `fuzzywuzzy` (for fuzzy keyword matching)
 - `python-Levenshtein` (optional, for improved performance of `fuzzywuzzy`)
 
-
 Install the required packages using pip and the provided `requirements.txt` file.
-
-    Install packages using pip:
 
     ```sh
     pip install -r requirements.txt
     ```
+
 1. **Run the script**:
 
-    ```sh
-    python clipper.py
-    ```
+   ```sh
+   python clipper.py
+   ```
 
 ## Usage
 
@@ -95,7 +93,7 @@ python clipper.py
 ```python
 # Example usage
 input_folder = './mediaSource'
-output_folder = './mediaClips'
+output_folder = './mediaClipOutput'
 keywords = ['example', 'keyword']
 pre_duration = 10  # seconds
 post_duration = 10  # seconds
@@ -106,20 +104,20 @@ process_videos(input_folder, output_folder, keywords, pre_duration, post_duratio
 ### Use Cases
 
 1. **Clipping Highlights from Videos**:
-     - Extract highlights from sports events or lectures based on specific keywords.
-     
+   - Extract highlights from sports events or lectures based on specific keywords.
 2. **Creating Video Summaries**:
-     - Generate summaries of long videos by clipping segments around important keywords.
+
+   - Generate summaries of long videos by clipping segments around important keywords.
 
 3. **Content Creation**:
-     - Create short clips for social media by extracting segments around trending keywords.
+   - Create short clips for social media by extracting segments around trending keywords.
 
 ## Output Structure
 
 The output folder will contain files named based on the original video file name and the keyword used to find the center point of the clip along with the centerpoint timestamp. For example:
 
-```
-mediaClips/
+```sh
+mediaClipOutput/keyword1/
 ├── video1_example_00-01-23-456.mp4
 ├── video1_example_00-01-23-456.jpg
 ├── video1_example_00-01-23-456.mp3
@@ -133,10 +131,10 @@ The `.json` metadata file includes information about the clip:
 
 ```json
 {
-        "center_point": "00:01:23,456",
-        "keyword": "example",
-        "start_time": "0:01:13",
-        "duration": 20
+  "center_point": "00:01:23,456",
+  "keyword": "example",
+  "start_time": "0:01:13",
+  "duration": 20
 }
 ```
 

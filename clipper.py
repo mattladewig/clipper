@@ -36,17 +36,17 @@ def find_keyword_timestamp(srt_file, keyword, threshold=90):
 
         score = fuzz.partial_ratio(keyword.lower(), subtitle_text.lower())
         if score >= threshold:
-            return timestamp_start, match
+            return timestamp_start, match, score
 
-    return None, None
+    return None, None, None
 
 def clip_video(video_file, start_time, duration, output_file):
     start_time = str(timedelta(seconds=start_time))
-    ffmpeg.input(video_file, ss=start_time, t=duration).output(output_file).run()
+    ffmpeg.input(video_file, ss=start_time, t=duration).output(output_file, vf='format=yuv420p').run()
 
 def extract_frame(video_file, timestamp, output_file):
     timestamp = convert_timestamp_format(timestamp)
-    ffmpeg.input(video_file, ss=timestamp).output(output_file, vframes=1).run()
+    ffmpeg.input(video_file, ss=timestamp).output(output_file, vframes=1, format='image2', vcodec='png').run()
 
 def extract_audio(video_file, start_time, duration, output_file):
     start_time = str(timedelta(seconds=start_time))
@@ -76,7 +76,7 @@ def extract_subtitles(srt_file, start_time, duration, output_file):
             if start_time <= timestamp_start_timedelta <= end_time:
                 file.write(f"{timestamp_start} --> {timestamp_end}\n{subtitle_text}\n\n")
 
-def process_videos(input_folder, output_folder, keywords, pre_duration, post_duration):
+def process_videos(input_folder, output_folder, keywords, pre_duration, post_duration, threshold):
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
@@ -91,7 +91,7 @@ def process_videos(input_folder, output_folder, keywords, pre_duration, post_dur
 
                 for keyword in keywords:
                     try:
-                        timestamp, match = find_keyword_timestamp(srt_file, keyword)
+                        timestamp, match, confidence = find_keyword_timestamp(srt_file, keyword, threshold)
                         if timestamp is None:
                             logging.info(f"Keyword '{keyword}' not found in {srt_file}.")
                             continue
@@ -100,36 +100,68 @@ def process_videos(input_folder, output_folder, keywords, pre_duration, post_dur
                         start_time = max(0, timestamp_seconds - pre_duration)
                         duration = pre_duration + post_duration
 
+                        keyword_output_folder = os.path.join(output_folder, keyword)
+                        if not os.path.exists(keyword_output_folder):
+                            os.makedirs(keyword_output_folder)
+
                         sanitized_filename = sanitize_filename(file)
-                        output_base = os.path.join(output_folder, f"{sanitized_filename}_{keyword}_{timestamp}")
+                        output_base = os.path.join(keyword_output_folder, f"{sanitized_filename}_{timestamp}")
 
-                        # Clip video
-                        clip_video(video_file, start_time, duration, f"{output_base}.mp4")
+                        # Check if output files already exist
+                        video_output_file = f"{output_base}.mp4"
+                        frame_output_file = f"{output_base}.png"  # Change extension to .png
+                        audio_output_file = f"{output_base}.mp3"
+                        subtitles_output_file = f"{output_base}.srt"
+                        metadata_output_file = f"{output_base}.json"
+                        txt_output_file = f"{output_base}.txt"
 
-                        # Extract frame
-                        extract_frame(video_file, timestamp, f"{output_base}.jpg")
+                        if os.path.exists(video_output_file):
+                            logging.info(f"Video file {video_output_file} already exists. Skipping.")
+                        else:
+                            # Clip video
+                            clip_video(video_file, start_time, duration, video_output_file)
 
-                        # Extract audio
-                        extract_audio(video_file, start_time, duration, f"{output_base}.mp3")
+                        if os.path.exists(frame_output_file):
+                            logging.info(f"Frame file {frame_output_file} already exists. Skipping.")
+                        else:
+                            # Extract frame
+                            extract_frame(video_file, timestamp, frame_output_file)
 
-                        # Extract subtitles
-                        extract_subtitles(srt_file, start_time, duration, f"{output_base}.srt")
+                        if os.path.exists(audio_output_file):
+                            logging.info(f"Audio file {audio_output_file} already exists. Skipping.")
+                        else:
+                            # Extract audio
+                            extract_audio(video_file, start_time, duration, audio_output_file)
 
-                        # Write metadata
-                        metadata = {
-                            "original_file": file,
-                            "keyword": keyword,
-                            "timestamp": timestamp,
-                            "start_time": start_time,
-                            "duration": duration,
-                        }
-                        with open(f"{output_base}.json", "w") as json_file:
-                            json.dump(metadata, json_file)
+                        if os.path.exists(subtitles_output_file):
+                            logging.info(f"Subtitles file {subtitles_output_file} already exists. Skipping.")
+                        else:
+                            # Extract subtitles
+                            extract_subtitles(srt_file, start_time, duration, subtitles_output_file)
 
-                        # Write center point and keyword to .txt file
-                        with open(f"{output_base}.txt", "w") as txt_file:
-                            txt_file.write(f"Center point: {timestamp}\n")
-                            txt_file.write(f"Keyword: {keyword}\n")
+                        if os.path.exists(metadata_output_file):
+                            logging.info(f"Metadata file {metadata_output_file} already exists. Skipping.")
+                        else:
+                            # Write metadata
+                            metadata = {
+                                "original_file": file,
+                                "keyword": keyword,
+                                "timestamp": timestamp,
+                                "start_time": start_time,
+                                "duration": duration,
+                                "confidence": confidence,
+                            }
+                            with open(metadata_output_file, "w") as json_file:
+                                json.dump(metadata, json_file)
+
+                        if os.path.exists(txt_output_file):
+                            logging.info(f"Text file {txt_output_file} already exists. Skipping.")
+                        else:
+                            # Write center point, keyword, and confidence to .txt file
+                            with open(txt_output_file, "w") as txt_file:
+                                txt_file.write(f"Center point: {timestamp}\n")
+                                txt_file.write(f"Keyword: {keyword}\n")
+                                txt_file.write(f"Confidence: {confidence}\n")
 
                     except Exception as e:
                         logging.error(f"Error processing {video_file} with keyword '{keyword}': {e}")
@@ -144,21 +176,21 @@ def main():
     parser.add_argument(
         "-i",
         "--input-folder",
-        default="./mediaSource",
+        default="./source",
         help="The folder containing the video files and accompanying .srt files.",
     )
     parser.add_argument(
         "-o",
         "--output-folder",
-        default="./mediaClips",
+        default="./output",
         help="The folder to output the clipped files.",
     )
     parser.add_argument(
         "-k",
         "--keywords",
-        nargs="+",
-        default=["test", "demo"],
-        help="The keywords to search for in the .srt files.",
+        type=str,
+        default="test,demo",
+        help="Comma-separated list of keywords to search for in the .srt files.",
     )
     parser.add_argument(
         "-p",
@@ -174,15 +206,26 @@ def main():
         default=10,
         help="The duration in seconds after the center point of the clip.",
     )
+    parser.add_argument(
+        "-th",
+        "--threshold",
+        type=int,
+        default=90,
+        help="The fuzzy matching threshold for keyword search.",
+    )
 
     args = parser.parse_args()
+
+    # Split the keywords string into a list
+    keywords = args.keywords.split(',')
 
     process_videos(
         args.input_folder,
         args.output_folder,
-        args.keywords,
+        keywords,
         args.pre_duration,
         args.post_duration,
+        args.threshold,
     )
 
 if __name__ == "__main__":

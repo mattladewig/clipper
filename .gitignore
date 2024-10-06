@@ -37,6 +37,6 @@
 
 # Custom rules
 
-mediaClips/*
-mediaSource/*
+output/*
+source/*
 .venv/*
