@@ -42,3 +42,4 @@ source/*
 .venv/*
 log/*
 debug*
+word_alt_map.py
