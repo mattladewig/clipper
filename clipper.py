@@ -17,6 +17,7 @@ from nltk.corpus import wordnet
 class ProcessMetaThread(threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
+        self.daemon = True  # Set the daemon attribute directly
 
     def run(self):
         lemmatizer = wnl()
@@ -392,7 +393,6 @@ def process_videos_parallel(
     numberOfThreads = 10  # Adjust the number of threads as needed
     for i in range(numberOfThreads):
         t = ProcessMetaThread()
-        t.setDaemon(True)
         t.start()
         threadsList.append(t)
 
