@@ -1,17 +1,28 @@
-import argparse
-import ffmpeg
-import json
-import logging
-import nltk
 import os
 import re
+import logging
+import argparse
+import concurrent.futures
+import json
+import threading
 from datetime import timedelta
 from fuzzywuzzy import fuzz
 from moviepy.video.io.ffmpeg_tools import ffmpeg_extract_subclip
-from nltk.corpus import wordnet
+import ffmpeg
+import nltk
 from nltk.stem import WordNetLemmatizer as wnl
+from nltk.corpus import wordnet
 
-# Ensure nltk resources are downloaded
+
+class ProcessMetaThread(threading.Thread):
+    def __init__(self):
+        threading.Thread.__init__(self)
+
+    def run(self):
+        lemmatizer = wnl()
+        lemmatizer.lemmatize("dog")
+
+
 # Ensure nltk resources are downloaded
 nltk_data_path = os.path.join(os.path.expanduser("~"), "nltk_data")
 if not os.path.exists(nltk_data_path):
@@ -28,6 +39,7 @@ try:
     nltk.data.find("corpora/omw-1.4")
 except LookupError:
     nltk.download("omw-1.4", download_dir=nltk_data_path)
+
 
 # Create log directory if it doesn't exist
 log_directory = "./log"
@@ -53,13 +65,16 @@ def get_word_forms(word):
         list: A list of word forms.
     """
     word_forms = [word]
+    lemmatizer = wnl()
 
     # Generate present participle and past tense forms
-    present_participle = wnl().lemmatize(word, "v") + "ing"
-    past_tense = wnl().lemmatize(word, "v") + "ed"
-    possessive_noun = wnl().lemmatize(word, "n") + "'s"
-    plural_noun = wnl().lemmatize(word, "n") + "s"
+    present_participle = lemmatizer.lemmatize(word, "v") + "ing"
+    past_tense = lemmatizer.lemmatize(word, "v") + "ed"
+    # Generate possessive and plural forms for nouns
+    possessive_noun = lemmatizer.lemmatize(word, "n") + "'s"
+    plural_noun = lemmatizer.lemmatize(word, "n") + "s"
     word_forms.extend([present_participle, past_tense, possessive_noun, plural_noun])
+
     return word_forms
 
 
@@ -85,6 +100,8 @@ def timestamp_to_seconds(timestamp):
     Returns:
         int: The total number of seconds represented by the timestamp.
     """
+    if isinstance(timestamp, int):
+        timestamp = str(timedelta(seconds=timestamp))
     h, m, s = timestamp.split(":")
     s = s.split(",")[0]  # Ignore milliseconds
     return int(h) * 3600 + int(m) * 60 + int(s)
@@ -173,6 +190,41 @@ def extract_frame(video_file, timestamp, output_file):
         f"Extracting frame: {video_file}, timestamp: {timestamp}, output_file: {output_file}"
     )
     timestamp = timestamp.split(",")[0]  # Ignore milliseconds
+    logging.info(
+        f"Running ffmpeg command: ffmpeg.input({video_file}, ss={timestamp}).output({output_file}, vframes=1, format='image2', vcodec='png').run()"
+    )
+    ffmpeg.input(video_file, ss=timestamp).output(
+        output_file, vframes=1, format="image2", vcodec="png"
+    ).run()
+
+
+def extract_frame(video_file, timestamp, output_file):
+    """
+    Extracts a frame from a video file at a specific timestamp and saves it as a PNG file.
+    Args:
+        video_file (str): Path to the input video file.
+        timestamp (str or int): Timestamp in the format 'HH:MM:SS' or seconds from which to extract the frame.
+        output_file (str): Path to the output PNG file.
+
+    Returns:
+        None
+
+    Raises:
+        ffmpeg.Error: If there is an error during the ffmpeg command execution.
+
+    Example:
+        extract_frame('input.mp4', '00:01:23', 'output.png')
+    """
+    logging.info(
+        f"Extracting frame: {video_file}, timestamp: {timestamp}, output_file: {output_file}"
+    )
+
+    # Ensure timestamp is a string
+    if isinstance(timestamp, int):
+        timestamp = str(timedelta(seconds=timestamp))
+    else:
+        timestamp = timestamp.split(",")[0]  # Ignore milliseconds if present
+
     logging.info(
         f"Running ffmpeg command: ffmpeg.input({video_file}, ss={timestamp}).output({output_file}, vframes=1, format='image2', vcodec='png').run()"
     )
@@ -288,7 +340,7 @@ def get_srt_duration(srt_file):
     return end_seconds - start_seconds
 
 
-def process_videos(
+def process_videos_parallel(
     source_folder,
     output_folder,
     keywords,
@@ -298,185 +350,218 @@ def process_videos(
     include_other_files,
 ):
     """
-    Processes videos in the source folder by searching for specified keywords in the associated .srt files,
-    and generates clips around the timestamps where the keywords are found.
+    Processes video files in parallel by extracting clips based on provided keywords and durations.
 
     Args:
         source_folder (str): Path to the folder containing the source video files.
-        output_folder (str): Path to the folder where the output clips and other files will be saved.
-        keywords (list of str): List of keywords to search for in the .srt files.
-        pre_duration (float): Duration (in seconds) to include before the keyword timestamp in the clip.
-        post_duration (float): Duration (in seconds) to include after the keyword timestamp in the clip.
-        threshold (float): Confidence threshold for keyword detection.
-        include_other_files (bool): Whether to include additional files (frame, audio, transcript, metadata, text) in the output.
+        output_folder (str): Path to the folder where the processed video clips will be saved.
+        keywords (list): List of keywords to search for in the video subtitles.
+        pre_duration (int): Duration (in seconds) to include before the keyword occurrence.
+        post_duration (int): Duration (in seconds) to include after the keyword occurrence.
+        threshold (float): Confidence threshold for keyword matching.
+        include_other_files (bool): Flag to include other related files in the output folder.
 
     Raises:
-        Exception: If there is an error processing a video file or keyword.
+        Exception: If an error occurs during video processing.
 
     Notes:
-        - The function expects each video file to have a corresponding .srt file with the same base name.
-        - If the duration of the video and the .srt file differ by more than 1%, the video is skipped.
-        - If a keyword is found, clips are generated around the keyword timestamp and saved in the output folder.
-        - Additional files (frame, audio, transcript, metadata, text) can be generated and saved if `include_other_files` is True.
-        - Existing output files are not overwritten.
+        - The function ensures that the WordNet resource is loaded before processing.
+        - It creates the output folder if it does not exist.
+        - It collects all .mp4 video files from the source folder and its subdirectories.
+        - It initializes a number of threads to ensure that the WordNetLemmatizer is thread-safe.
+        - It processes the videos in parallel using a ThreadPoolExecutor.
+        - It logs a warning if a corresponding .srt file is not found for a video.
+        - It waits for all threads to complete before finishing.
     """
+    # Ensure WordNet is loaded
+    wordnet.ensure_loaded()
+
+    # Create output folder if it doesn't exist
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
+    # Collect video files
+    video_files = []
     for root, _, files in os.walk(source_folder):
         for file in files:
             if file.endswith(".mp4"):
-                video_file = os.path.join(root, file)
-                srt_file = os.path.splitext(video_file)[0] + ".srt"
-                if not os.path.exists(srt_file):
-                    e = f"Missing .srt file for {video_file}. Skipping."
-                    logging.error(e)
-                    print(e)
+                video_files.append(os.path.join(root, file))
+
+    # Initialize threads to ensure WordNetLemmatizer is thread-safe
+    threadsList = []
+    numberOfThreads = 10  # Adjust the number of threads as needed
+    for i in range(numberOfThreads):
+        t = ProcessMetaThread()
+        t.setDaemon(True)
+        t.start()
+        threadsList.append(t)
+
+    # Process videos in parallel
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = []
+        for video_file in video_files:
+            srt_file = video_file.replace(".mp4", ".srt")
+            if os.path.exists(srt_file):
+                futures.append(
+                    executor.submit(
+                        process_video,
+                        video_file,
+                        srt_file,
+                        keywords,
+                        pre_duration,
+                        post_duration,
+                        threshold,
+                        output_folder,
+                        include_other_files,
+                    )
+                )
+            else:
+                logging.warning(f"No corresponding SRT file for {video_file}")
+
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                logging.error(f"Error processing video: {e}")
+
+    # Wait for all threads to complete
+    for t in threadsList:
+        t.join()
+
+
+def process_video(
+    video_file,
+    srt_file,
+    keywords,
+    pre_duration,
+    post_duration,
+    threshold,
+    output_folder,
+    include_other_files,
+):
+    """
+    Processes a video file by extracting clips around specified keywords found in the associated SRT file.
+    Parameters:
+    video_file (str): Path to the video file to be processed.
+    srt_file (str): Path to the SRT file containing subtitles for the video.
+    keywords (list of str): List of keywords to search for in the SRT file.
+    pre_duration (float): Duration (in seconds) to include before the keyword timestamp in the clip.
+    post_duration (float): Duration (in seconds) to include after the keyword timestamp in the clip.
+    threshold (float): Confidence threshold for keyword detection.
+    output_folder (str): Directory where the output clips and other files will be saved.
+    include_other_files (bool): Whether to include additional files (frame, audio, transcript, metadata, text) in the output.
+    Returns:
+    None
+    """
+    try:
+        logging.info(f"Processing video: {video_file} with SRT: {srt_file}")
+        video_duration = get_video_duration(video_file)
+        srt_duration = get_srt_duration(srt_file)
+
+        if abs(video_duration - srt_duration) / video_duration > 0.01:
+            e = f"Duration mismatch: {video_file} (video: {video_duration}s, srt: {srt_duration}s). Skipping."
+            logging.error(e)
+            print(e)
+            return
+
+        for keyword in keywords:
+            results = find_keyword_timestamps(srt_file, keyword, threshold)
+            if not results:
+                i = f"Keyword '{keyword}' not found in {srt_file}."
+                logging.info(i)
+                print(i)
+                continue
+
+            clip_ranges = []
+            for timestamp, _, confidence in results:
+                timestamp_seconds = timestamp_to_seconds(timestamp)
+                start_time = max(0, timestamp_seconds - pre_duration)
+                end_time = timestamp_seconds + post_duration
+
+                if any(start <= timestamp_seconds <= end for start, end in clip_ranges):
+                    logging.info(
+                        f"Timestamp {timestamp} for keyword '{keyword}' is within an existing clip range. Skipping."
+                    )
                     continue
 
-                try:
-                    video_duration = get_video_duration(video_file)
-                    srt_duration = get_srt_duration(srt_file)
+                clip_ranges.append((start_time, end_time))
+                logging.info(
+                    f"Processing keyword '{keyword}' at timestamp {timestamp} (start_time: {start_time}, end_time: {end_time})"
+                )
 
-                    if abs(video_duration - srt_duration) / video_duration > 0.01:
-                        e = f"Duration mismatch: {video_file} (video: {video_duration}s, srt: {srt_duration}s). Skipping."
-                        logging.error(e)
-                        print(e)
-                        continue
+                keyword_output_folder = os.path.join(output_folder, keyword)
+                if not os.path.exists(keyword_output_folder):
+                    os.makedirs(keyword_output_folder)
 
-                    for keyword in keywords:
-                        results = find_keyword_timestamps(srt_file, keyword, threshold)
-                        if not results:
-                            i = f"Keyword '{keyword}' not found in {srt_file}."
-                            logging.info(i)
-                            print(i)
-                            continue
+                sanitized_filename = sanitize_filename(os.path.basename(video_file))
+                output_base = os.path.join(
+                    keyword_output_folder, f"{sanitized_filename}_{timestamp}"
+                )
 
-                        clip_ranges = []
-                        for timestamp, _, confidence in results:
-                            timestamp_seconds = timestamp_to_seconds(timestamp)
-                            start_time = max(0, timestamp_seconds - pre_duration)
-                            end_time = timestamp_seconds + post_duration
-
-                            # Check if this timestamp falls within any existing clip range
-                            if any(
-                                start <= timestamp_seconds <= end
-                                for start, end in clip_ranges
-                            ):
-                                logging.info(
-                                    f"Timestamp {timestamp} for keyword '{keyword}' is within an existing clip range. Skipping."
-                                )
-                                continue
-
-                            # Add the new clip range
-                            clip_ranges.append((start_time, end_time))
-
-                            logging.info(
-                                f"Processing keyword '{keyword}' at timestamp {timestamp} (start_time: {start_time}, end_time: {end_time})"
-                            )
-
-                            keyword_output_folder = os.path.join(output_folder, keyword)
-                            if not os.path.exists(keyword_output_folder):
-                                os.makedirs(keyword_output_folder)
-
-                            sanitized_filename = sanitize_filename(file)
-                            output_base = os.path.join(
-                                keyword_output_folder,
-                                f"{sanitized_filename}_{timestamp}",
-                            )
-
-                            # Check if output files already exist
-                            video_output_file = f"{output_base}.mp4"
-                            frame_output_file = f"{output_base}.png"
-                            audio_output_file = f"{output_base}.mp3"
-                            transcript_output_file = f"{output_base}.srt"
-                            metadata_output_file = f"{output_base}.json"
-                            txt_output_file = f"{output_base}.txt"
-
-                            if os.path.exists(video_output_file):
-                                logging.info(
-                                    f"Video file {video_output_file} already exists. Skipping."
-                                )
-                            else:
-                                # Clip video
-                                clip_video(
-                                    video_file,
-                                    timestamp,
-                                    timestamp,
-                                    pre_duration,
-                                    post_duration,
-                                    video_output_file,
-                                )
-
-                            if include_other_files:
-                                if os.path.exists(frame_output_file):
-                                    logging.info(
-                                        f"Frame file {frame_output_file} already exists. Skipping."
-                                    )
-                                else:
-                                    # Extract frame
-                                    extract_frame(
-                                        video_file, timestamp, frame_output_file
-                                    )
-
-                                if os.path.exists(audio_output_file):
-                                    logging.info(
-                                        f"Audio file {audio_output_file} already exists. Skipping."
-                                    )
-                                else:
-                                    # Extract audio
-                                    extract_audio(
-                                        video_file,
-                                        start_time,
-                                        end_time - start_time,
-                                        audio_output_file,
-                                    )
-
-                                if os.path.exists(transcript_output_file):
-                                    logging.info(
-                                        f"transcript file {transcript_output_file} already exists. Skipping."
-                                    )
-                                else:
-                                    # Extract transcript
-                                    extract_transcript(
-                                        srt_file,
-                                        start_time,
-                                        end_time - start_time,
-                                        transcript_output_file,
-                                    )
-
-                                if os.path.exists(metadata_output_file):
-                                    logging.info(
-                                        f"Metadata file {metadata_output_file} already exists. Skipping."
-                                    )
-                                else:
-                                    # Write metadata
-                                    metadata = {
-                                        "original_file": file,
-                                        "keyword": keyword,
-                                        "timestamp": timestamp,
-                                        "start_time": start_time,
-                                        "end_time": end_time,
-                                        "confidence": confidence,
-                                    }
-                                    with open(metadata_output_file, "w") as json_file:
-                                        json.dump(metadata, json_file)
-
-                                if os.path.exists(txt_output_file):
-                                    logging.info(
-                                        f"Text file {txt_output_file} already exists. Skipping."
-                                    )
-                                else:
-                                    # Write center point, keyword, and confidence to .txt file
-                                    with open(txt_output_file, "w") as txt_file:
-                                        txt_file.write(f"Center point: {timestamp}\n")
-                                        txt_file.write(f"Keyword: {keyword}\n")
-                                        txt_file.write(f"Confidence: {confidence}\n")
-
-                except Exception as e:
-                    logging.error(
-                        f"Error processing {video_file} with keyword '{keyword}': {e}"
+                video_output_file = f"{output_base}.mp4"
+                if not os.path.exists(video_output_file):
+                    clip_video(
+                        video_file,
+                        timestamp_seconds,
+                        timestamp_seconds,
+                        pre_duration,
+                        post_duration,
+                        video_output_file,
                     )
+
+                if include_other_files:
+                    frame_output_file = f"{output_base}.png"
+                    audio_output_file = f"{output_base}.mp3"
+                    transcript_output_file = f"{output_base}.srt"
+                    metadata_output_file = f"{output_base}.json"
+                    txt_output_file = f"{output_base}.txt"
+
+                    if not os.path.exists(frame_output_file):
+                        extract_frame(video_file, timestamp_seconds, frame_output_file)
+                    if not os.path.exists(audio_output_file):
+                        extract_audio(
+                            video_file,
+                            start_time,
+                            end_time - start_time,
+                            audio_output_file,
+                        )
+                    if not os.path.exists(transcript_output_file):
+                        extract_transcript(
+                            srt_file,
+                            start_time,
+                            end_time - start_time,
+                            transcript_output_file,
+                        )
+
+                    if os.path.exists(metadata_output_file):
+                        logging.info(
+                            f"Metadata file {metadata_output_file} already exists. Skipping."
+                        )
+                    else:
+                        # Write metadata
+                        metadata = {
+                            "original_file": video_file,
+                            "timestamp": timestamp,
+                            "start_time": start_time,
+                            "end_time": end_time,
+                            "confidence": confidence,
+                        }
+                    with open(metadata_output_file, "w") as json_file:
+                        json.dump(metadata, json_file)
+
+                    if os.path.exists(txt_output_file):
+                        logging.info(
+                            f"Text file {txt_output_file} already exists. Skipping."
+                        )
+                    else:
+                        # Write center point, keyword, and confidence to .txt file
+                        with open(txt_output_file, "w") as txt_file:
+                            txt_file.write(f"Timestamp: {timestamp}\n")
+                            txt_file.write(f"Keyword: {keyword}\n")
+                            txt_file.write(f"Confidence: {confidence}\n")
+
+    except Exception as e:
+        logging.error(f"Error processing {video_file} with keyword '{keyword}': {e}")
 
 
 def main():
@@ -536,7 +621,7 @@ def main():
 
     keywords = args.keywords.split(",")
 
-    process_videos(
+    process_videos_parallel(
         args.source_folder,
         args.output_folder,
         keywords,
