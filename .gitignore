@@ -40,3 +40,5 @@
 output/*
 source/*
 .venv/*
+log/*
+debug*

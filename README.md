@@ -16,24 +16,28 @@ Clipper is a Python script that processes video files by clipping segments based
 
 ## Functional Requirements
 
-1. The script should process all .mp4 files in the input folder.
+1. Process all .mp4 files in the input folder.
 2. Each .mp4 file should have a corresponding .srt file with the same name.
-3. If the .srt file is missing, the script should log a warning and skip the video file.
-4. The script should search for specified keywords in the .srt files.
-5. If a keyword is found, the script should extract a clip from the video.
+3. If the .srt file is missing, log a warning and skip the video file.
+4. Search for specified keywords in the .srt files.
+5. If a keyword is found, extract a clip from the video.
 6. Search of keyword should use a fuzzy search matching and provide for a configurable match threshold.
-7. The clip should start a specified number of seconds before the keyword's timestamp.
-8. The clip should end a specified number of seconds after the keyword's timestamp.
-9. The script should sanitize filenames to remove non-ASCII characters and replace spaces with underscores.
-10. The script should extract a frame from the video at the keyword's timestamp.
-11. The script should extract audio from the video for the duration of the clip.
-12. The script should extract subtitles from the .srt file for the duration of the clip.
-13. The script should save the extracted clip, frame, audio, and subtitles to the output folder.
-14. The script should save metadata about the clip to a .json file.
-15. The script should save the center point and keyword to a .txt file.
-16. The script should log errors encountered during processing.
-17. The script should accept command-line arguments for input folder, output folder, keywords, pre-duration, and post-duration.
-18. The script should create the output folder if it does not exist.
+7. The clip should start at a specified number of seconds before the keyword's timestamp.
+8. The clip should end at a specified number of seconds after the keyword's timestamp.
+9. Sanitize filenames to remove non-ASCII characters and replace spaces with underscores.
+10.  Extract a frame from the video at the keyword's timestamp.
+11.  Extract audio from the video for the duration of the clip.
+12.  Extract subtitles from the .srt file for the duration of the clip.
+13.  Save the extracted clip, frame, audio, and subtitles to the output folder.
+14.  Save metadata about the clip to a .json file.
+15.  Save the center point and keyword to a .txt file.
+16.  Log errors, info and warnings encountered during processing.
+17.  Accept command-line arguments for input folder, output folder, keywords, pre-duration, and post-duration.
+18.  Create the output folder if it does not exist.
+19.  Verify the source .mp4 and .srt duration in seconds are roughly equal.
+20.  Search for possessive forms of proper nouns such as Names. For example, if the keyword is "John", also search for "John's".
+21.  Search for Present participle forms of verbs. For example, if the keyword is "run", also search for "running".
+22.  Search for past tense forms of verbs and past tense forms of participles. Example, if the keyword is "fail", then also search for "failed".
 
 ## Dependencies
 
