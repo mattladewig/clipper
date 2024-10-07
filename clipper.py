@@ -42,7 +42,7 @@ def generate_bidirectional_mapping(base_dict):
 
 
 # Generate the bidirectional mapping
-common_alternatives = generate_bidirectional_mapping(word_alt_map)
+custom_alternatives = generate_bidirectional_mapping(word_alt_map)
 
 # Ensure nltk resources are downloaded
 nltk_data_path = os.path.join(os.path.expanduser("~"), "nltk_data")
@@ -88,6 +88,10 @@ def get_word_forms(word):
     word_forms = [word]
     lemmatizer = wnl()
 
+    # Add common alternatives
+    if word in custom_alternatives:
+        word_forms.extend(custom_alternatives[word])
+
     # Generate present participle and past tense forms
     present_participle = lemmatizer.lemmatize(word, "v") + "ing"
     past_tense = lemmatizer.lemmatize(word, "v") + "ed"
@@ -96,13 +100,11 @@ def get_word_forms(word):
     plural_noun = lemmatizer.lemmatize(word, "n") + "s"
     word_forms.extend([present_participle, past_tense, possessive_noun, plural_noun])
 
-    # Add common alternatives
-    if word in common_alternatives:
-        word_forms.extend(common_alternatives[word])
-
     # Remove duplicates
     word_forms = list(set(word_forms))
-
+    logging.info(
+        f"Will search keyword '{word}' and generative alternatives: {word_forms}"
+    )
     return word_forms
 
 
