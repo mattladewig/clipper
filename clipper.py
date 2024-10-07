@@ -616,8 +616,12 @@ def main():
         "-k",
         "--keywords",
         type=str,
-        required=True,
         help="Comma-separated keywords to search for in the transcript.",
+    )
+    parser.add_argument(
+        "-f",
+        "--file",
+        help="Path to a file containing keywords, one per line.",
     )
     parser.add_argument(
         "-p",
@@ -648,7 +652,14 @@ def main():
     )
     args = parser.parse_args()
 
-    keywords = args.keywords.split(",")
+    # Determine the source of keywords
+    if args.file:
+        with open(args.file, 'r') as file:
+            keywords = [line.strip() for line in file if line.strip()]
+    elif args.keywords:
+        keywords = args.keywords.split(",")
+    else:
+        raise ValueError("Either --keywords or --file must be provided.")
 
     process_videos_parallel(
         args.source_folder,
