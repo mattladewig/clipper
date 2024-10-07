@@ -12,6 +12,7 @@ import ffmpeg
 import nltk
 from nltk.stem import WordNetLemmatizer as wnl
 from nltk.corpus import wordnet
+from word_alt_map import word_alt_map
 
 
 class ProcessMetaThread(threading.Thread):
@@ -23,6 +24,25 @@ class ProcessMetaThread(threading.Thread):
         lemmatizer = wnl()
         lemmatizer.lemmatize("dog")
 
+
+def generate_bidirectional_mapping(base_dict):
+    bidirectional_dict = {}
+    for key, values in base_dict.items():
+        if key not in bidirectional_dict:
+            bidirectional_dict[key] = set(values)
+        for value in values:
+            if value not in bidirectional_dict:
+                bidirectional_dict[value] = set()
+            bidirectional_dict[value].add(key)
+            bidirectional_dict[value].update(values)
+    # Convert sets back to lists
+    for key in bidirectional_dict:
+        bidirectional_dict[key] = list(bidirectional_dict[key])
+    return bidirectional_dict
+
+
+# Generate the bidirectional mapping
+common_alternatives = generate_bidirectional_mapping(word_alt_map)
 
 # Ensure nltk resources are downloaded
 nltk_data_path = os.path.join(os.path.expanduser("~"), "nltk_data")
@@ -59,7 +79,7 @@ logging.basicConfig(
 
 def get_word_forms(word):
     """
-    Generate different forms of a word: present participle, past tense, and possessive.
+    Generate different forms of a word: present participle, past tense, possessive, and common alternatives.
     Args:
         word (str): The original word.
     Returns:
@@ -75,6 +95,13 @@ def get_word_forms(word):
     possessive_noun = lemmatizer.lemmatize(word, "n") + "'s"
     plural_noun = lemmatizer.lemmatize(word, "n") + "s"
     word_forms.extend([present_participle, past_tense, possessive_noun, plural_noun])
+
+    # Add common alternatives
+    if word in common_alternatives:
+        word_forms.extend(common_alternatives[word])
+
+    # Remove duplicates
+    word_forms = list(set(word_forms))
 
     return word_forms
 
