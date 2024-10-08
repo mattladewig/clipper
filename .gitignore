@@ -38,10 +38,11 @@
 
 # Custom rules
 __pycache__
+out_missing_srt/*
 output/*
 source/*
 .venv/*
 log/*
 debug*
 word_alt_map.py
-keywords.txt
+keywords

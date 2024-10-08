@@ -1,6 +1,7 @@
 import os
 import re
 import logging
+import shutil
 import argparse
 import concurrent.futures
 import json
@@ -52,6 +53,9 @@ if not os.path.exists(nltk_data_path):
 nltk.data.path.append(nltk_data_path)
 
 try:
+    pass  # Placeholder to ensure try block has content
+except Exception as e:
+    logging.error(f"An error occurred: {e}")
     nltk.data.find("corpora/wordnet")
 except LookupError:
     nltk.download("wordnet", download_dir=nltk_data_path)
@@ -121,6 +125,17 @@ def sanitize_filename(filename):
     sanitized = sanitized.replace(" ", "_")
     return sanitized
 
+def sanitize_path(path):
+    """
+    Sanitizes a given path by removing non-ASCII characters and replacing spaces with underscores.
+    Args:
+        path (str): The original path to be sanitized.
+    Returns:
+        str: The sanitized path with non-ASCII characters replaced by hyphens and spaces replaced by underscores.
+    """
+    sanitized = re.sub(r"[^\x00-\x7F]+", "-", path)
+    sanitized = sanitized.replace(" ", "_")
+    return sanitized
 
 def timestamp_to_seconds(timestamp):
     """
@@ -457,21 +472,20 @@ def process_videos_parallel(
     for t in threadsList:
         t.join()
 
-
-def process_video(
-    video_file,
-    srt_file,
-    keywords,
-    pre_duration,
-    post_duration,
-    threshold,
-    output_folder,
-    include_other_files,
-):
+def wrap_in_quotes(path):
     """
-    Processes a video file by extracting clips around specified keywords found in the associated SRT file.
-    Parameters:
-    video_file (str): Path to the video file to be processed.
+    Wrap the given path in double quotes if it contains spaces or special characters.
+    """
+    if ' ' in path or any(char in path for char in ['[', ']', '(', ')', '\u200b', '\u202f']):
+        return f'"{path}"'
+    return path
+
+def process_video(video_file, srt_file, keywords, pre_duration, post_duration, threshold, output_folder, include_other_files):
+    """
+    Processes a video file based on the provided SRT file and keywords.
+
+    Args:
+    video_file (str): Path to the video file.
     srt_file (str): Path to the SRT file containing subtitles for the video.
     keywords (list of str): List of keywords to search for in the SRT file.
     pre_duration (float): Duration (in seconds) to include before the keyword timestamp in the clip.
@@ -479,11 +493,41 @@ def process_video(
     threshold (float): Confidence threshold for keyword detection.
     output_folder (str): Directory where the output clips and other files will be saved.
     include_other_files (bool): Whether to include additional files (frame, audio, transcript, metadata, text) in the output.
+
     Returns:
     None
     """
+    # Ensure paths are handled correctly across platforms
+    video_file = os.path.normpath(video_file)
+    srt_file = os.path.normpath(srt_file)
+    output_folder = os.path.normpath(output_folder)
+    missing_srt_dir = os.path.join(output_folder, "missing_srt")
+    
+    # Wrap paths in quotes if on Windows
+    if os.name == 'nt':
+        video_file = wrap_in_quotes(video_file)
+        srt_file = wrap_in_quotes(srt_file)
+
+    logging.info(f"Normalized paths - Video file: {video_file}, SRT file: {srt_file}, Output folder: {output_folder}")
+
+    if not os.path.exists(srt_file):
+        # Create the output directory if it doesn't exist
+        if not os.path.exists(missing_srt_dir):
+            os.makedirs(missing_srt_dir)
+        
+        # Move the video file to the missing SRT directory
+        try:
+            sanitized_video_file = sanitize_path(video_file)
+            sanitized_missing_srt_dir = sanitize_path(missing_srt_dir)
+            shutil.move(sanitized_video_file, os.path.join(sanitized_missing_srt_dir, os.path.basename(sanitized_video_file)))
+            logging.error(f"Missing SRT file for video: {video_file}. Moved to {missing_srt_dir}.")
+        except Exception as e:
+            logging.error(f"Failed to move video file {video_file} to {missing_srt_dir}: {e}")
+        return
+    
     try:
         logging.info(f"Processing video: {video_file} with SRT: {srt_file}")
+    
         video_duration = get_video_duration(video_file)
         srt_duration = get_srt_duration(srt_file)
 
@@ -590,7 +634,7 @@ def process_video(
                             txt_file.write(f"Confidence: {confidence}\n")
 
     except Exception as e:
-        logging.error(f"Error processing {video_file} with keyword '{keyword}': {e}")
+        logging.error(f"An error occurred while processing the video {video_file}: {e}")
 
 
 def main():
@@ -659,7 +703,7 @@ def main():
     elif args.keywords:
         keywords = args.keywords.split(",")
     else:
-        raise ValueError("Either --keywords or --file must be provided.")
+        raise ValueError("Either --keywords -k or --file -f must be provided.")
 
     process_videos_parallel(
         args.source_folder,
