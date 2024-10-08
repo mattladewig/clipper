@@ -200,36 +200,6 @@ def clip_video(
 
 def extract_frame(video_file, timestamp, output_file):
     """
-    Extracts a single frame from a video file at a specified timestamp and saves it as an image.
-
-    Args:
-        video_file (str): Path to the input video file.
-        timestamp (str): Timestamp in the format 'HH:MM:SS' to extract the frame from.
-        output_file (str): Path to save the extracted frame image.
-
-    Returns:
-        None
-
-    Raises:
-        ffmpeg.Error: If there is an error during the ffmpeg command execution.
-
-    Example:
-        extract_frame('input.mp4', '00:01:23', 'output.png')
-    """
-    logging.info(
-        f"Extracting frame: {video_file}, timestamp: {timestamp}, output_file: {output_file}"
-    )
-    timestamp = timestamp.split(",")[0]  # Ignore milliseconds
-    logging.info(
-        f"Running ffmpeg command: ffmpeg.input({video_file}, ss={timestamp}).output({output_file}, vframes=1, format='image2', vcodec='png').run()"
-    )
-    ffmpeg.input(video_file, ss=timestamp).output(
-        output_file, vframes=1, format="image2", vcodec="png"
-    ).run()
-
-
-def extract_frame(video_file, timestamp, output_file):
-    """
     Extracts a frame from a video file at a specific timestamp and saves it as a PNG file.
     Args:
         video_file (str): Path to the input video file.
@@ -487,7 +457,7 @@ def process_video(
         video_duration = get_video_duration(video_file)
         srt_duration = get_srt_duration(srt_file)
 
-        if abs(video_duration - srt_duration) / video_duration > 0.01:
+        if abs(video_duration - srt_duration) / video_duration > 0.1:
             e = f"Duration mismatch: {video_file} (video: {video_duration}s, srt: {srt_duration}s). Skipping."
             logging.error(e)
             print(e)
@@ -498,8 +468,20 @@ def process_video(
             if not results:
                 i = f"Keyword '{keyword}' not found in {srt_file}."
                 logging.info(i)
-                print(i)
+                if logging.getLogger().getEffectiveLevel() in (
+                    logging.INFO,
+                    logging.DEBUG,
+                ):
+                    print(i)
                 continue
+            else:
+                i = f"Keyword '{keyword}' found in {srt_file}."
+                logging.info(i)
+                if logging.getLogger().getEffectiveLevel() in (
+                    logging.INFO,
+                    logging.DEBUG,
+                ):
+                    print(i)
 
             clip_ranges = []
             for timestamp, _, confidence in results:
@@ -588,6 +570,7 @@ def process_video(
                             txt_file.write(f"Timestamp: {timestamp}\n")
                             txt_file.write(f"Keyword: {keyword}\n")
                             txt_file.write(f"Confidence: {confidence}\n")
+            logging.info(f"Found '{keyword}' in {video_file}.")
 
     except Exception as e:
         logging.error(f"Error processing {video_file} with keyword '{keyword}': {e}")
@@ -634,7 +617,7 @@ def main():
         "-d",
         "--post-duration",
         type=int,
-        default=30,
+        default=10,
         help="The duration (in seconds) to include after the keyword timestamp.",
     )
     parser.add_argument(
@@ -654,7 +637,7 @@ def main():
 
     # Determine the source of keywords
     if args.file:
-        with open(args.file, 'r') as file:
+        with open(args.file, "r") as file:
             keywords = [line.strip() for line in file if line.strip()]
     elif args.keywords:
         keywords = args.keywords.split(",")
