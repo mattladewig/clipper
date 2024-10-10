@@ -70,7 +70,7 @@ if not os.path.exists(log_directory):
 # Configure logging to write to a file in the log directory
 log_file = os.path.join(log_directory, "clipper.log")
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
     format="%(asctime)s - %(levelname)s - %(message)s",
     filename=log_file,
     filemode="a",
@@ -611,14 +611,14 @@ def main():
         "--pre-duration",
         type=int,
         default=5,
-        help="The duration (in seconds) to include before the keyword timestamp.",
+        help="The duration (in seconds) to include before the keyword timestamp. Default 5 seconds.",
     )
     parser.add_argument(
         "-d",
         "--post-duration",
         type=int,
         default=10,
-        help="The duration (in seconds) to include after the keyword timestamp.",
+        help="The duration (in seconds) to include after the keyword timestamp. Default 10 seconds.",
     )
     parser.add_argument(
         "-t",
