@@ -161,7 +161,7 @@ def find_keyword_timestamps(srt_file, keyword, threshold):
 
     for match in matches:
         timestamp_start = match.group(1).split(",")[0]  # Ignore milliseconds
-        timestamp_end = match.group(2).split(",")[0]  # Ignore milliseconds
+        #timestamp_end = match.group(2).split(",")[0]  # Ignore milliseconds
         transcript_text = match.group(3)
 
         words = transcript_text.split()
@@ -291,7 +291,7 @@ def extract_transcript(srt_file, start_time, duration, output_file):
             timestamp_start_td = timedelta(
                 seconds=timestamp_to_seconds(timestamp_start)
             )
-            timestamp_end_td = timedelta(seconds=timestamp_to_seconds(timestamp_end))
+            #timestamp_end_td = timedelta(seconds=timestamp_to_seconds(timestamp_end))
 
             if start_time_td <= timestamp_start_td <= end_time_td:
                 out_file.write(
@@ -390,7 +390,7 @@ def process_videos_parallel(
     # Initialize threads to ensure WordNetLemmatizer is thread-safe
     threadsList = []
     numberOfThreads = 10  # Adjust the number of threads as needed
-    for i in range(numberOfThreads):
+    for _i in range(numberOfThreads):
         t = ProcessMetaThread()
         t.start()
         threadsList.append(t)
