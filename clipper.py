@@ -13,6 +13,7 @@ import nltk
 from nltk.stem import WordNetLemmatizer as wnl
 from nltk.corpus import wordnet
 from word_alt_map import word_alt_map
+from collections import defaultdict
 
 
 class ProcessMetaThread(threading.Thread):
@@ -62,19 +63,43 @@ except LookupError:
     nltk.download("omw-1.4", download_dir=nltk_data_path)
 
 
-# Create log directory if it doesn't exist
-log_directory = "./log"
-if not os.path.exists(log_directory):
-    os.makedirs(log_directory)
+def configure_logging(args):
+    """
+    Configures logging based on the provided arguments.
 
-# Configure logging to write to a file in the log directory
-log_file = os.path.join(log_directory, "clipper.log")
-logging.basicConfig(
-    level=logging.WARNING,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    filename=log_file,
-    filemode="a",
-)
+    Args:
+        args (argparse.Namespace): The parsed command-line arguments.
+    """
+    # Create log directory if it doesn't exist
+    log_directory = "./log"
+    if not os.path.exists(log_directory):
+        os.makedirs(log_directory)
+
+    # Configure logging to write to a file in the log directory
+    log_file = os.path.join(log_directory, "clipper.log")
+
+    # Configure logging
+    if args.debug:
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(asctime)s - %(levelname)s - %(message)s",
+            filename=log_file,
+            filemode="a",
+        )
+    elif args.verbose:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s - %(levelname)s - %(message)s",
+            filename=log_file,
+            filemode="a",
+        )
+    else:
+        logging.basicConfig(
+            level=logging.WARNING,
+            format="%(asctime)s - %(levelname)s - %(message)s",
+            filename=log_file,
+            filemode="a",
+        )
 
 
 def get_word_forms(word):
@@ -161,7 +186,7 @@ def find_keyword_timestamps(srt_file, keyword, threshold):
 
     for match in matches:
         timestamp_start = match.group(1).split(",")[0]  # Ignore milliseconds
-        #timestamp_end = match.group(2).split(",")[0]  # Ignore milliseconds
+        # timestamp_end = match.group(2).split(",")[0]  # Ignore milliseconds
         transcript_text = match.group(3)
 
         words = transcript_text.split()
@@ -195,7 +220,9 @@ def clip_video(
     start_time = max(0, timestamp_to_seconds(timestamp_start) - pre_duration)
     end_time = timestamp_to_seconds(timestamp_end) + post_duration
     logging.info(f"Clipping video from {start_time} to {end_time}")
-    ffmpeg_extract_subclip(video_file, start_time, end_time, targetname=output_file)
+    ffmpeg_extract_subclip(
+        video_file, start_time, end_time, targetname=output_file, logger=None
+    )
 
 
 def extract_frame(video_file, timestamp, output_file):
@@ -215,9 +242,8 @@ def extract_frame(video_file, timestamp, output_file):
     Example:
         extract_frame('input.mp4', '00:01:23', 'output.png')
     """
-    logging.info(
-        f"Extracting frame: {video_file}, timestamp: {timestamp}, output_file: {output_file}"
-    )
+    log = "Extracting frame: {video_file}, timestamp: {timestamp}, output_file: {output_file}"
+    logging.info(log)
 
     # Ensure timestamp is a string
     if isinstance(timestamp, int):
@@ -291,7 +317,7 @@ def extract_transcript(srt_file, start_time, duration, output_file):
             timestamp_start_td = timedelta(
                 seconds=timestamp_to_seconds(timestamp_start)
             )
-            #timestamp_end_td = timedelta(seconds=timestamp_to_seconds(timestamp_end))
+            # timestamp_end_td = timedelta(seconds=timestamp_to_seconds(timestamp_end))
 
             if start_time_td <= timestamp_start_td <= end_time_td:
                 out_file.write(
@@ -395,6 +421,8 @@ def process_videos_parallel(
         t.start()
         threadsList.append(t)
 
+    keyword_counts = defaultdict(lambda: defaultdict(int))
+
     # Process videos in parallel
     with concurrent.futures.ThreadPoolExecutor() as executor:
         futures = []
@@ -412,6 +440,7 @@ def process_videos_parallel(
                         threshold,
                         output_folder,
                         include_other_files,
+                        keyword_counts,
                     )
                 )
             else:
@@ -427,6 +456,8 @@ def process_videos_parallel(
     for t in threadsList:
         t.join()
 
+    return keyword_counts
+
 
 def process_video(
     video_file,
@@ -437,6 +468,7 @@ def process_video(
     threshold,
     output_folder,
     include_other_files,
+    keyword_counts,
 ):
     """
     Processes a video file by extracting clips around specified keywords found in the associated SRT file.
@@ -453,35 +485,34 @@ def process_video(
     None
     """
     try:
-        logging.info(f"Processing video: {video_file} with SRT: {srt_file}")
+        log = f"Processing video: {video_file} with SRT: {srt_file}"
+        if logging.getLogger().getEffectiveLevel() in (logging.INFO,):
+            print(log)
+        logging.info(log)
         video_duration = get_video_duration(video_file)
         srt_duration = get_srt_duration(srt_file)
 
         if abs(video_duration - srt_duration) / video_duration > 0.1:
-            e = f"Duration mismatch: {video_file} (video: {video_duration}s, srt: {srt_duration}s). Skipping."
+            e = f"ERROR - Duration mismatch - {video_file} (video: {video_duration}s, srt: {srt_duration}s). Skipping..."
             logging.error(e)
             print(e)
             return
 
         for keyword in keywords:
             results = find_keyword_timestamps(srt_file, keyword, threshold)
+            keyword_counts[video_file][keyword] = len(results)
             if not results:
-                i = f"Keyword '{keyword}' not found in {srt_file}."
-                logging.info(i)
-                if logging.getLogger().getEffectiveLevel() in (
-                    logging.INFO,
-                    logging.DEBUG,
-                ):
-                    print(i)
+                log = f"Keyword '{keyword}' not found in {srt_file}."
+                # if logging.getLogger().getEffectiveLevel() in (
+                #    logging.INFO,
+                # ):
+                logging.info(log)
                 continue
             else:
-                i = f"Keyword '{keyword}' found in {srt_file}."
-                logging.info(i)
-                if logging.getLogger().getEffectiveLevel() in (
-                    logging.INFO,
-                    logging.DEBUG,
-                ):
-                    print(i)
+                log = f"Keyword '{keyword}' found in {srt_file}."
+                if logging.getLogger().getEffectiveLevel() in (logging.INFO,):
+                    print(log)
+                logging.info(log)
 
             clip_ranges = []
             for timestamp, _, confidence in results:
@@ -490,8 +521,8 @@ def process_video(
                 end_time = timestamp_seconds + post_duration
 
                 if any(start <= timestamp_seconds <= end for start, end in clip_ranges):
-                    logging.info(
-                        f"Timestamp {timestamp} for keyword '{keyword}' is within an existing clip range. Skipping."
+                    logging.debug(
+                        f"Timestamp {timestamp} for keyword '{keyword}' is within an existing clip range. Skipping..."
                     )
                     continue
 
@@ -545,7 +576,7 @@ def process_video(
                         )
 
                     if os.path.exists(metadata_output_file):
-                        logging.info(
+                        logging.debug(
                             f"Metadata file {metadata_output_file} already exists. Skipping."
                         )
                     else:
@@ -561,7 +592,7 @@ def process_video(
                         json.dump(metadata, json_file)
 
                     if os.path.exists(txt_output_file):
-                        logging.info(
+                        logging.debug(
                             f"Text file {txt_output_file} already exists. Skipping."
                         )
                     else:
@@ -633,8 +664,20 @@ def main():
         action="store_true",
         help="Include other files (frames, audio, transcript, metadata) in the output. Default is to include only the .mp4 video clip.",
     )
+    # New argument for logging level
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Enable verbose logging.",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug logging.",
+    )
     args = parser.parse_args()
-
+    configure_logging(args)
     # Determine the source of keywords
     if args.file:
         with open(args.file, "r") as file:
@@ -644,7 +687,7 @@ def main():
     else:
         raise ValueError("Either --keywords or --file must be provided.")
 
-    process_videos_parallel(
+    keyword_counts = process_videos_parallel(
         args.source_folder,
         args.output_folder,
         keywords,
@@ -653,6 +696,15 @@ def main():
         args.threshold,
         args.include_other_files,
     )
+
+    # Print summary
+    print("\nResults:\n")
+    header = "\t" + "\t".join(keywords)
+    print(header)
+    print("-" * len(header.expandtabs()))
+    for video, counts in keyword_counts.items():
+        row = [os.path.basename(video)] + [str(counts[keyword]) for keyword in keywords]
+        print("\t".join(row))
 
 
 if __name__ == "__main__":
