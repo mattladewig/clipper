@@ -698,7 +698,7 @@ def main():
     )
 
     # Write summary to a file
-    summary_file = os.path.join(args.output_folder, "summary.csv")
+    summary_file = os.path.join(args.output_folder, "result.csv")
     with open(summary_file, "w") as f:
         header = "video," + ",".join(keywords)
         f.write(header + "\n")
@@ -708,7 +708,7 @@ def main():
                 str(counts[keyword]) for keyword in keywords
             ]
             f.write(",".join(row) + "\n")
-    logging.info(f"Summary of keyword results output to {summary_file}")
+    logging.info(f"Result output to {summary_file}")
     print(f"Summary of keyword results available at {summary_file}")
 
 
