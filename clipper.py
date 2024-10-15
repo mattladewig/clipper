@@ -493,9 +493,9 @@ def process_video(
         srt_duration = get_srt_duration(srt_file)
 
         if abs(video_duration - srt_duration) / video_duration > 0.1:
-            e = f"ERROR - Duration mismatch - {video_file} (video: {video_duration}s, srt: {srt_duration}s). Skipping..."
-            logging.error(e)
-            print(e)
+            log = f"WARNING - Duration mismatch - {video_file} (video: {video_duration}s, srt: {srt_duration}s). Skipping..."
+            logging.warning(log)
+            print(log)
             return
 
         for keyword in keywords:
@@ -697,14 +697,19 @@ def main():
         args.include_other_files,
     )
 
-    # Print summary
-    print("\nResults:\n")
-    header = "\t" + "\t".join(keywords)
-    print(header)
-    print("-" * len(header.expandtabs()))
-    for video, counts in keyword_counts.items():
-        row = [os.path.basename(video)] + [str(counts[keyword]) for keyword in keywords]
-        print("\t".join(row))
+    # Write summary to a file
+    summary_file = os.path.join(args.output_folder, "summary.csv")
+    with open(summary_file, "w") as f:
+        header = "video," + ",".join(keywords)
+        f.write(header + "\n")
+        for video, counts in keyword_counts.items():
+            video = f'"{video}"'
+            row = [os.path.basename(video)] + [
+                str(counts[keyword]) for keyword in keywords
+            ]
+            f.write(",".join(row) + "\n")
+    logging.info(f"Summary of keyword results output to {summary_file}")
+    print(f"Summary of keyword results available at {summary_file}")
 
 
 if __name__ == "__main__":
