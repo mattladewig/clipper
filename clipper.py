@@ -704,7 +704,7 @@ def main():
         f.write(header + "\n")
         for video, counts in keyword_counts.items():
             video = f'"{video}"'
-            row = [os.path.basename(video)] + [
+            row = [video] + [
                 str(counts[keyword]) for keyword in keywords
             ]
             f.write(",".join(row) + "\n")
