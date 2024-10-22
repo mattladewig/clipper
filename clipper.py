@@ -304,12 +304,16 @@ def clip_video(
     Raises:
     ffmpeg.Error: If an error occurs during the ffmpeg process.
     """
-    video_duration = get_video_duration(video_file)
-    start_time = max(0, timestamp_to_seconds(timestamp_start) - pre_duration)
-    end_time = min(video_duration, timestamp_to_seconds(timestamp_end) + post_duration)
+    video_duration: int = get_video_duration(video_file)
+    start_time: int = max(0, timestamp_to_seconds(timestamp_start) - pre_duration)
+    end_time: int = min(video_duration, timestamp_to_seconds(timestamp_end) + post_duration)
     log = f"Clipping video from {start_time} to {end_time}: {transcript_text}"
     do_logging(log)
     output_path = os.path.join(output_folder, output_file)
+        # Check if the output file already exists
+    if os.path.exists(output_path):
+        logging.info(f"Output file already exists: {output_path}. Skipping clip creation.")
+        return
     srt_file = video_file.replace(".mp4", ".srt")
     srt_clip = clip_srt(srt_file, start_time, end_time)
     # Clip the video and add metadata using ffmpeg
@@ -355,10 +359,11 @@ def clip_video(
             logging.error(f"ffmpeg stderr: {e.stderr.decode('utf-8')}")
         else:
             logging.error("ffmpeg error occurred, but no stderr output is available.")
-        raise e
+
     output_path_with_text = output_path.replace(".mp4", "_with_srt.mp4")
     # Add transcript text to the video
     add_srt_to_video(output_path, srt_clip, output_path_with_text)
+
 
 # create function to clip srt file for same start_time and end_time as video clip
 def clip_srt(srt_file, start_time, end_time):
@@ -388,13 +393,16 @@ def clip_srt(srt_file, start_time, end_time):
     for match in matches:
         timestamp_start = timestamp_to_seconds(match[0].split(",")[0])
         timestamp_end = timestamp_to_seconds(match[1].split(",")[0])
-        if start_time <= timestamp_start <= end_time or start_time <= timestamp_end <= end_time:
-            clipped_content.append(f"{sequence_number}\n{match[0]} --> {match[1]}\n{match[2]}\n")
+        if (
+            start_time <= timestamp_start <= end_time
+            or start_time <= timestamp_end <= end_time
+        ):
+            clipped_content.append(
+                f"{sequence_number}\n{match[0]} --> {match[1]}\n{match[2]}\n"
+            )
             sequence_number += 1
 
     return "\n".join(clipped_content)
-
-
 
 
 def validate_srt_content(srt_content):
@@ -416,6 +424,7 @@ def validate_srt_content(srt_content):
         # Other lines can be empty or contain text
     return True
 
+
 def add_srt_to_video(video_clip, srt_clip, output_file):
     """
     Adds an SRT subtitle track to a video clip and saves the result as a new video file.
@@ -436,8 +445,10 @@ def add_srt_to_video(video_clip, srt_clip, output_file):
         raise ValueError("Invalid SRT content format")
 
     # Create a temporary SRT file in the current working directory
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".srt", dir=".") as temp_srt_file:
-        temp_srt_file.write(srt_clip.encode('utf-8'))
+    with tempfile.NamedTemporaryFile(
+        delete=False, suffix=".srt", dir="tmp"
+    ) as temp_srt_file:
+        temp_srt_file.write(srt_clip.encode("utf-8"))
         temp_srt_path = temp_srt_file.name
 
     # Ensure the temporary SRT file is written correctly
@@ -448,11 +459,17 @@ def add_srt_to_video(video_clip, srt_clip, output_file):
     try:
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
             ffmpeg.input(video_clip).output(
-            output_file, vf=f"subtitles={temp_srt_path}", vcodec="libx264", acodec="copy"
+                output_file,
+                vf=f"subtitles={temp_srt_path}",
+                vcodec="libx264",
+                acodec="copy",
             ).run(overwrite_output=True)
         else:
             ffmpeg.input(video_clip).output(
-            output_file, vf=f"subtitles={temp_srt_path}", vcodec="libx264", acodec="copy"
+                output_file,
+                vf=f"subtitles={temp_srt_path}",
+                vcodec="libx264",
+                acodec="copy",
             ).run(quiet=True, overwrite_output=True)
     except ffmpeg.Error as e:
         logging.error(f"ffmpeg error: {e}")
@@ -463,7 +480,7 @@ def add_srt_to_video(video_clip, srt_clip, output_file):
         # delete video_clip, then rename output_file to video_clip
         os.remove(video_clip)
         os.rename(output_file, video_clip)
-        
+
 
 def extract_frame(video_file, timestamp, output_file):
     """
