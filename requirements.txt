@@ -2,3 +2,5 @@ ffmpeg-python
 fuzzywuzzy[speedup]
 moviepy
 nltk
+pytest
+pytest-mock

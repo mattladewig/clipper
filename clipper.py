@@ -5,6 +5,7 @@ import argparse
 import threading
 import time
 from datetime import timedelta
+from typing import Any, List, LiteralString
 from fuzzywuzzy import fuzz
 import ffmpeg
 from ffmpeg import Error as FFMpegError
@@ -66,10 +67,10 @@ def generate_bidirectional_mapping(base_dict):
             if value not in bidirectional_dict:
                 bidirectional_dict[value] = set()
             bidirectional_dict[value].add(key)
-            bidirectional_dict[value].update(values)
-    # Convert sets back to lists
+            bidirectional_dict[value].update(v for v in values if v != value)
+    # Convert sets back to lists and sort them
     for key in bidirectional_dict:
-        bidirectional_dict[key] = list(bidirectional_dict[key])
+        bidirectional_dict[key] = sorted(list(bidirectional_dict[key]))
     return bidirectional_dict
 
 
@@ -97,7 +98,7 @@ def configure_logging(args):
         os.makedirs(log_directory)
 
     # Configure logging to write to a file in the log directory
-    log_file = os.path.join(log_directory, "clipper.log")
+    log_file: LiteralString = os.path.join(log_directory, "clipper.log")
 
     # Configure logging
     if args.debug:
@@ -114,6 +115,12 @@ def configure_logging(args):
             filename=log_file,
             filemode="a",
         )
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        console_handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+        )
+        logging.getLogger().addHandler(console_handler)
     else:
         logging.basicConfig(
             level=logging.WARNING,
@@ -121,19 +128,6 @@ def configure_logging(args):
             filename=log_file,
             filemode="a",
         )
-
-
-def do_logging(log):
-    """
-    Logs a message at the INFO level. If the current logging level is INFO,
-    the message is also printed to the console.
-    Args:
-        log (str): The message to be logged.
-    """
-
-    if logging.getLogger().getEffectiveLevel() in (logging.INFO,):
-        print(log)
-    logging.info(log)
 
 
 def get_all_search_targets(keywords):
@@ -153,7 +147,7 @@ def get_all_search_targets(keywords):
         intermediate search targets, identified word types, and final search targets.
     """
     log = f"Initial search targets: {keywords}"
-    do_logging(log)
+    logging.info(log)
 
     all_search_targets = []
     search_targets = []
@@ -167,72 +161,103 @@ def get_all_search_targets(keywords):
         search_targets.append(k)
         if k in custom_alternatives:
             log = f"Found custom word map alternatives for '{k}': {custom_alternatives[k]}"
-            do_logging(log)
+            logging.info(log)
             search_targets.extend(custom_alternatives[k])
 
-    search_targets = list(set(search_targets))  # intermediate remove duplicates
-
-    log = f"Intermediate search targets: {search_targets}"
-    do_logging(log)
+    log: str = f"Intermediate search targets: {search_targets}"
+    logging.info(log)
 
     for t in search_targets:
         # Initialize lists for different forms of the word
         present_participle = []
         past_tense = []
         plural_noun = []
+        irregular_plurals = dict()
+        irregular_plural_noun = []
+        word_type = []  # Other
 
         # Determine the type of the word
-        word_type = None
         if wordnet.synsets(t, pos=wordnet.VERB):
-            word_type = "v"
-        elif wordnet.synsets(t, pos=wordnet.NOUN):
-            word_type = "n"
-        else:
-            word_type = "o"  # Other
+            word_type.extend("v")
+        if wordnet.synsets(t, pos=wordnet.NOUN):
+            word_type.extend("n")
 
         # Log the word type
         log = f"Word '{t}' is identified as a {word_type}."
-        do_logging(log)
+        logging.info(log)
         # Generate present participle and past tense forms for verbs
 
-        if word_type == "v":
+        if "v" in word_type:
             lem = lemmatizer.lemmatize(t, "v")
             log = f"lem: {lem}"
-            do_logging(log)
+            logging.info(log)
 
             all_search_targets.append(lem)
 
             # past_tense verb rules:
-            ## Ends in "y": Change the "y" to "i" and add "-ed"
 
-            ## Ends in "y": Change the "y" to "i" and add "-ed"
+            ## Ends in "y": Change the "y" to "i" and add "-ed", e.g. "study" -> "studied"
             if lem[-1] in "y" and lem[-2] not in "aeiou":
-                past_tense = [lem[:-1] + "ied"]
+                past_tense: List[str] = [lem[:-1] + "ied"]
 
             # rules for present_participle:
             ## Verbs ending in "-e": Drop the "-e" and add "-ing". For example, "make" becomes "making".
             ## Verbs ending in "-ie": Drop the "-ie", add a "-y", and then add "-ing". For example, "lie" becomes "lying".
-            if lem[-1] in "e" and lem[-2] not in "e":
+            if lem[-1] in "e" and lem[-2] not in "ei":
                 present_participle = [lem[:-1] + "ing"]
             elif lem.endswith("ie"):
-                present_participle = [lem[:-2] + "ying"]
+                present_participle: List[str] = [lem[:-2] + "ying"]
 
             if present_participle:
                 all_search_targets.extend(present_participle)
             if past_tense:
                 all_search_targets.extend(past_tense)
-        elif word_type == "n":
-            lem = lemmatizer.lemmatize(t, "n")
+
+        if "n" in word_type:
+            lem: str = lemmatizer.lemmatize(t, "n")
             log = f"lem: {lem}"
-            do_logging(log)
+            logging.info(log)
             all_search_targets.append(lem)
 
-            # Generate plural forms where base nouns are modified.
-            ## If the word ends in "-y" and the letter before the "-y" is a consonant, change the "-y" to "-ies". For example, "man" becomes "men".
-            if t.endswith("y") and t[-2] not in "aeiou":
-                plural_noun = [t[:-1] + "ies"]
+            # Add irregular plural forms for common singular nouns
+            irregular_plurals: dict = {
+                "child": "children",
+                "man": "men",
+                "woman": "women",
+                "tooth": "teeth",
+                "foot": "feet",
+                "mouse": "mice",
+                "goose": "geese",
+                "louse": "lice",
+                "die": "dice",
+                "person": "people",
+                "cactus": "cacti",
+                "focus": "foci",
+                "fungus": "fungi",
+                "nucleus": "nuclei",
+                "syllabus": "syllabi",
+                "analysis": "analyses",
+                "diagnosis": "diagnoses",
+                "oasis": "oases",
+                "thesis": "theses",
+                "crisis": "crises",
+                "phenomenon": "phenomena",
+                "criterion": "criteria",
+                "datum": "data",
+            }
 
-            if plural_noun:
+            if lem in irregular_plurals:
+                irregular_plural_noun = [irregular_plurals[lem]]
+                all_search_targets.extend(irregular_plural_noun)
+            # Handle reverse mapping for irregular plurals
+            reverse_irregular_plurals = {v: k for k, v in irregular_plurals.items()}
+            if lem in reverse_irregular_plurals:
+                irregular_plural_noun = [reverse_irregular_plurals[lem]]
+                all_search_targets.extend(irregular_plural_noun)
+
+            ## If the word ends in "-y" and the letter before the "-y" is a consonant, change the "-y" to "-ies".
+            if lem.endswith("y") and lem[-2] not in "aeiou":
+                plural_noun: List[Any] = [lem[:-1] + "ies"]
                 all_search_targets.extend(plural_noun)
 
     all_search_targets.extend(search_targets)
@@ -241,25 +266,27 @@ def get_all_search_targets(keywords):
         word for word in all_search_targets if len(word) > 2
     ]  # remove short words
 
-    all_search_targets = list(set(all_search_targets))  # final remove duplicates
+    all_search_targets = sorted(
+        list(set(all_search_targets))
+    )  # final remove duplicates and sort
 
     log = f"Final search targets: {all_search_targets}"
-    do_logging(log)
+    logging.info(log)
 
     return all_search_targets
 
 
 def sanitize_filename(filename):
     """
-    Sanitizes a given filename by removing non-ASCII characters and replacing spaces with underscores.
+    Sanitizes a given filename by removing non-ASCII characters and replacing spaces and special characters with underscores.
     Args:
         filename (str): The original filename to be sanitized.
     Returns:
-        str: The sanitized filename with non-ASCII characters replaced by hyphens and spaces replaced by underscores.
+        str: The sanitized filename with non-ASCII characters replaced by hyphens and spaces and special characters replaced by underscores.
     """
 
-    sanitized = re.sub(r"[^\x00-\x7F]+", "-", filename)
-    sanitized = sanitized.replace(" ", "_")
+    sanitized: str = re.sub(r"[^\x00-\x7F]+", "-", filename)
+    sanitized = re.sub(r"[ /:*?\"<>|\\]", "_", sanitized)
     return sanitized
 
 
@@ -306,13 +333,18 @@ def clip_video(
     """
     video_duration: int = get_video_duration(video_file)
     start_time: int = max(0, timestamp_to_seconds(timestamp_start) - pre_duration)
-    end_time: int = min(video_duration, timestamp_to_seconds(timestamp_end) + post_duration)
+    end_time: int = min(
+        video_duration, timestamp_to_seconds(timestamp_end) + post_duration
+    )
     log = f"Clipping video from {start_time} to {end_time}: {transcript_text}"
-    do_logging(log)
+    logging.info(log)
     output_path = os.path.join(output_folder, output_file)
-        # Check if the output file already exists
-    if os.path.exists(output_path):
-        logging.info(f"Output file already exists: {output_path}. Skipping clip creation.")
+    output_path_sanitized = os.path.join(output_folder, sanitize_filename(output_file))
+    # Check if the output file already exists
+    if os.path.exists(output_path_sanitized):
+        logging.info(
+            f"Output file already exists: {output_path}. Skipping clip creation."
+        )
         return
     srt_file = video_file.replace(".mp4", ".srt")
     srt_clip = clip_srt(srt_file, start_time, end_time)
@@ -360,9 +392,9 @@ def clip_video(
         else:
             logging.error("ffmpeg error occurred, but no stderr output is available.")
 
-    output_path_with_text = output_path.replace(".mp4", "_with_srt.mp4")
+    output_file_with_text = output_file.replace(".mp4", "_with_srt.mp4")
     # Add transcript text to the video
-    add_srt_to_video(output_path, srt_clip, output_path_with_text)
+    add_srt_to_video(output_file, srt_clip, output_folder, output_file_with_text)
 
 
 # create function to clip srt file for same start_time and end_time as video clip
@@ -425,7 +457,7 @@ def validate_srt_content(srt_content):
     return True
 
 
-def add_srt_to_video(video_clip, srt_clip, output_file):
+def add_srt_to_video(video_clip, srt_clip, output_folder, output_file):
     """
     Adds an SRT subtitle track to a video clip and saves the result as a new video file.
     Args:
@@ -437,16 +469,21 @@ def add_srt_to_video(video_clip, srt_clip, output_file):
     Raises:
         ffmpeg.Error: If there is an error during the ffmpeg command execution.
     """
-    log = f"Adding SRT to video: {video_clip}, {output_file}"
-    do_logging(log)
+    log = f"Adding SRT to video: {video_clip}, exporting new video to {output_file}"
+    logging.info(log)
 
     # Validate SRT content
     if not validate_srt_content(srt_clip):
         raise ValueError("Invalid SRT content format")
 
-    # Create a temporary SRT file in the current working directory
+    # Ensure the "tmp" directory exists
+    tmp_dir = "tmp"
+    if not os.path.exists(tmp_dir):
+        os.makedirs(tmp_dir)
+
+    # Create a temporary SRT file in the "tmp" directory
     with tempfile.NamedTemporaryFile(
-        delete=False, suffix=".srt", dir="tmp"
+        delete=False, suffix=".srt", dir=tmp_dir
     ) as temp_srt_file:
         temp_srt_file.write(srt_clip.encode("utf-8"))
         temp_srt_path = temp_srt_file.name
@@ -454,32 +491,49 @@ def add_srt_to_video(video_clip, srt_clip, output_file):
     # Ensure the temporary SRT file is written correctly
     if not os.path.exists(temp_srt_path):
         raise FileNotFoundError(f"Temporary SRT file not found: {temp_srt_path}")
+    logging.debug(f"Temporary SRT file created: {temp_srt_path}")
+
+    # Read temp_srt file to debug log
+    with open(temp_srt_path, "r") as file:
+        temp_srt_content = file.read()
+        logging.debug(f"Temporary SRT file content: {temp_srt_content}")
 
     # Construct the ffmpeg command to add the SRT subtitle track
+    input_clip_path = os.path.join(output_folder, video_clip)
+    output_clip_path = os.path.join(output_folder, sanitize_filename(output_file))
     try:
         if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
-            ffmpeg.input(video_clip).output(
-                output_file,
+            ffmpeg.input(input_clip_path).output(
+                output_clip_path,
                 vf=f"subtitles={temp_srt_path}",
                 vcodec="libx264",
                 acodec="copy",
             ).run(overwrite_output=True)
         else:
-            ffmpeg.input(video_clip).output(
-                output_file,
+            ffmpeg.input(input_clip_path).output(
+                output_clip_path,
                 vf=f"subtitles={temp_srt_path}",
                 vcodec="libx264",
                 acodec="copy",
             ).run(quiet=True, overwrite_output=True)
     except ffmpeg.Error as e:
         logging.error(f"ffmpeg error: {e}")
-        raise
-    finally:
-        # Clean up the temporary SRT file
-        os.remove(temp_srt_path)
-        # delete video_clip, then rename output_file to video_clip
-        os.remove(video_clip)
-        os.rename(output_file, video_clip)
+        raise e
+
+    # Clean up the temporary SRT file
+    try:
+        if os.path.exists(temp_srt_path):
+            os.remove(temp_srt_path)
+            logging.debug(f"Successfully removed temporary SRT file: {temp_srt_path}")
+    except OSError as e:
+        logging.error(f"Error removing temporary SRT file {temp_srt_path}: {e}")
+    # Clean up the source clip
+    try:
+        if os.path.exists(input_clip_path):
+            os.remove(input_clip_path)
+            logging.debug(f"Successfully removed source clip: {input_clip_path}")
+    except OSError as e:
+        logging.error(f"Error removing source clip: {input_clip_path}: {e}")
 
 
 def extract_frame(video_file, timestamp, output_file):
@@ -577,7 +631,7 @@ def find_keyword_timestamps(srt_file, all_search_targets, threshold):
         transcript_words = transcript_text.split()
         for w in transcript_words:
             for keyword in all_search_targets:
-                fuzz_score = fuzz.ratio(w.lower(), keyword.lower())
+                fuzz_score: int = fuzz.ratio(w.lower(), keyword.lower())
                 if fuzz_score >= threshold:
                     results.append(
                         (
@@ -593,10 +647,10 @@ def find_keyword_timestamps(srt_file, all_search_targets, threshold):
                     break
 
     if results:
-        do_logging(f"Results: {results}")
+        logging.info(f"Results: {results}")
         return results
     else:
-        do_logging("No results found.")
+        logging.info("No results found.")
         return None
 
 
@@ -635,7 +689,7 @@ def get_srt_duration(srt_file):
     with open(srt_file, "r") as file:
         content = file.read()
 
-    matches = re.findall(
+    matches: list[Any] = re.findall(
         r"(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})", content
     )
     if not matches:
@@ -644,8 +698,8 @@ def get_srt_duration(srt_file):
     start_timestamp = matches[0][0].split(",")[0]  # Ignore milliseconds
     end_timestamp = matches[-1][1].split(",")[0]  # Ignore milliseconds
 
-    start_seconds = timestamp_to_seconds(start_timestamp)
-    end_seconds = timestamp_to_seconds(end_timestamp)
+    start_seconds: int = timestamp_to_seconds(start_timestamp)
+    end_seconds: int = timestamp_to_seconds(end_timestamp)
 
     return end_seconds - start_seconds
 
@@ -700,8 +754,8 @@ def process_all_videos(
                 processed_time_ranges = []
                 for result in results:
                     keyword = result[4]
-                    timestamp_start = timestamp_to_seconds(result[1])
-                    timestamp_end = timestamp_to_seconds(result[2])
+                    timestamp_start: int = timestamp_to_seconds(result[1])
+                    timestamp_end: int = timestamp_to_seconds(result[2])
 
                     # Check if the current keyword instance falls within any existing clip time range
                     overlap = False
@@ -722,7 +776,9 @@ def process_all_videos(
                     )
 
                     transcript_text = result[3]
-                    output_file = f"{os.path.splitext(os.path.basename(video_file))[0]}_{transcript_text}.mp4"
+                    output_file: str = (
+                        f"{os.path.splitext(os.path.basename(video_file))[0]}_{transcript_text}.mp4"
+                    )
                     clip_video(
                         video_file,
                         transcript_text,
@@ -735,7 +791,7 @@ def process_all_videos(
                     )
                     keyword_counts[video_file][keyword] += 1
         else:
-            do_logging(f"No SRT file found for {video_file}")
+            logging.info(f"No SRT file found for {video_file}")
 
     return keyword_counts
 
@@ -809,7 +865,7 @@ def main():
         action="store_true",
         help="Enable debug logging.",
     )
-    args = parser.parse_args()
+    args: argparse.Namespace = parser.parse_args()
 
     # Ensure nltk resources are downloaded
     nltk_data_path = os.path.join(os.path.expanduser("~"), "nltk_data")
@@ -817,7 +873,6 @@ def main():
         os.makedirs(nltk_data_path)
 
     nltk.data.path.append(nltk_data_path)
-
     try:
         nltk.data.find("corpora/wordnet")
     except LookupError:
@@ -828,16 +883,22 @@ def main():
     except LookupError:
         nltk.download("omw-1.4", download_dir=nltk_data_path)
 
+    wordnet.ensure_loaded()
+
     configure_logging(args)
 
     # Determine the source of keywords
+    if args.file and args.keywords:
+        raise ValueError(
+            "Both --keywords/-k and --file/-f cannot be provided together."
+        )
     if args.file:
         with open(args.file, "r") as file:
-            keywords = [line.strip() for line in file if line.strip()]
+            keywords: list[str] = [line.strip() for line in file if line.strip()]
     elif args.keywords:
         keywords = args.keywords.split(",")
     else:
-        raise ValueError("Either --keywords or --file must be provided.")
+        raise ValueError("Either --keywords/-k or --file/-f must be provided.")
 
     all_search_targets = get_all_search_targets(keywords)
 
@@ -856,16 +917,24 @@ def main():
         )
 
         # Write summary to a file
-        summary_file = os.path.join(args.output_folder, "result.csv")
-        with open(summary_file, "w") as f:
-            header = "video," + ",".join(all_search_targets)
-            f.write(header + "\n")
-            for video, counts in keyword_counts.items():
-                video = f'"{video}"'
-                row = [video] + [str(counts[t]) for t in all_search_targets]
-                f.write(",".join(row) + "\n")
-        logging.info(f"Result output to {summary_file}")
-        print(f"Summary of keyword results available at {summary_file}")
+        logging.debug(f"Keyword counts: {keyword_counts}")
+        logging.debug(f"Result output to {all_search_targets}")
+        if "keyword_counts" in locals():
+            summary_file = os.path.join(args.output_folder, "keyword_summary.csv")
+            logging.debug(f"Result output to {summary_file}")
+            with open(summary_file, "w") as f:
+                header: LiteralString = "video," + ",".join(all_search_targets)
+                f.write(header + "\n")
+                for video, counts in keyword_counts.items():
+                    video: str = f'"{video}"'
+                    row: list[str] = [video] + [
+                        str(counts[t]) for t in all_search_targets
+                    ]
+                    f.write(",".join(row) + "\n")
+            logging.info(f"Result output to {summary_file}")
+            print(f"Summary of keyword results available at {summary_file}")
+        else:
+            logging.error("keyword_counts empty.")
 
     except KeyboardInterrupt:
         print("Exiting due to KeyboardInterrupt")

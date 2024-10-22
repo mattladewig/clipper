@@ -37,6 +37,7 @@
 
 
 # Custom rules
+.pytest_cache
 __pycache__
 output/*
 source/*
@@ -46,3 +47,4 @@ debug*
 word_alt_map.py
 keywords
 tmp/*
+tests/test.srt
