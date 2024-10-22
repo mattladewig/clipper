@@ -1,0 +1,31 @@
+{
+    "configurations": [
+
+        {
+            "name": "Python Debugger: clipper.py (Launch)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "clipper.py",
+            "console": "integratedTerminal",
+            "args": [
+                "-s",
+                "/mnt/d/video_processing/clipper/source",
+                "-o",
+                "/mnt/d/video_processing/clipper/output",
+                "-p",
+                "10",
+                "-d",
+                "15",
+                "-f",
+                "keywords",
+                "--debug"
+            ]
+        },
+        {
+            "name": "Python Debugger: Python File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}"
+        }
+    ]
+}

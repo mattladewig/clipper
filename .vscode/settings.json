@@ -12,5 +12,6 @@
         "vcodec",
         "vframes",
         "wordnet"
-    ]
+    ],
+    "pythonIndent.trimLinesWithOnlyWhitespace": true
 }
