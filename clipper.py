@@ -1,5 +1,4 @@
 import argparse
-import json
 import logging
 import os
 import subprocess
@@ -95,6 +94,7 @@ def process_video(
 
     clips = merge_subtitle_ranges(matched_subtitles, pre_buffer, post_buffer)
 
+    # trunk-ignore(ruff/B007)
     for idx, (start_time, end_time, clip_subs) in enumerate(clips, 1):
         duration = end_time - start_time
         if start_time < 0:
