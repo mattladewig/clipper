@@ -39,7 +39,7 @@
 # Custom rules
 .pytest_cache
 __pycache__
-source_videos/*
+videos/*
 clips/*
 .venv/*
 log/*

@@ -1,8 +1,7 @@
 {
     "verbose": true,
-  //  "video_file": "video.mp4", // Ignored if directory is provided
- //   "subtitle_file": "video.srt", // Ignored if directory is provided
-    "directory": "source_videos", // Optional: Directory containing .mp4 and .srt files
+    "video_file": "./videos/1.mp4",
+    "subtitle_file": "./videos/1.srt",
     "output_dir": "clips",
     "keywords": [
         "hi",
@@ -14,8 +13,8 @@
             "hello"
         ]
     },
-    "pre_buffer": 20.0, // Default 20.0: Number of seconds to include before the keyword
-    "post_buffer": 20.0, // Default 20.0: Number of seconds to include after the keyword
-    "max_workers": 4, // Optional: Number of workers to use for processing
-    "use_subdirs": false // Default False: If true, output clips will be placed in subdirectories corresponding to the keyword
+    "pre_buffer": 20.0,
+    "post_buffer": 20.0,
+    "max_workers": 4,
+    "use_subdirs": true
 }
