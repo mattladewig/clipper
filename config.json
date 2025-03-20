@@ -1,10 +1,10 @@
 {
-    "verbose": true,
+    "logging": "INFO",
     "directory": "videos",
     "output_dir": "clips",
     "keywords": [
-        "copper",
-        "big"
+        "hello",
+        "world"
     ],
     "word_alt_map": {
         "hi": [
@@ -15,5 +15,5 @@
     "pre_buffer": 10.0,
     "post_buffer": 10.0,
     "max_workers": 2,
-    "use_subdirs": false
+    "use_subdirs": true
 }
