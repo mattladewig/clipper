@@ -39,8 +39,8 @@
 # Custom rules
 .pytest_cache
 __pycache__
-output/*
-source/*
+source_videos/*
+clips/*
 .venv/*
 log/*
 debug*

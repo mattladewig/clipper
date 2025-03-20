@@ -1,6 +1,7 @@
-ffmpeg-python
-fuzzywuzzy[speedup]
-moviepy
-nltk
 pytest
 pytest-mock
+pydantic >= 2.10.6
+srt
+tqdm >= 4.66.3
+ffmpeg-python
+inflect
