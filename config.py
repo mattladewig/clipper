@@ -13,9 +13,9 @@ class ClipperConfig(BaseModel):
     verbose: bool = False
     directory: Optional[str] = None
     word_alt_map: Optional[Dict[str, List[str]]] = None
-    pre_buffer: float = 20.0
-    post_buffer: float = 20.0
-    max_workers: Optional[int] = 4
+    pre_buffer: Optional[float]
+    post_buffer: Optional[float]
+    max_workers: Optional[int]
     use_subdirs: bool = False  # New: Organize outputs into subdirectories
 
     @classmethod

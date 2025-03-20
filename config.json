@@ -1,11 +1,10 @@
 {
     "verbose": true,
-    "video_file": "./videos/1.mp4",
-    "subtitle_file": "./videos/1.srt",
+    "directory": "videos",
     "output_dir": "clips",
     "keywords": [
-        "hi",
-        "world"
+        "copper",
+        "big"
     ],
     "word_alt_map": {
         "hi": [
@@ -13,8 +12,8 @@
             "hello"
         ]
     },
-    "pre_buffer": 20.0,
-    "post_buffer": 20.0,
-    "max_workers": 4,
-    "use_subdirs": true
+    "pre_buffer": 10.0,
+    "post_buffer": 10.0,
+    "max_workers": 2,
+    "use_subdirs": false
 }
