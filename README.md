@@ -1,6 +1,6 @@
 # Clipper
 
-Clipper is a Python-based tool designed to extract video clips from `.mp4` files based on keywords found in corresponding `.srt` subtitle files. It handles complex filenames with emojis and special characters, ensuring compatibility across Windows and Linux, and generates clips with embedded subtitles at 404x720 resolution.
+Clipper is a Python-based tool designed to extract video clips from `.mp4` files based on keywords found in corresponding `.srt` subtitle files. It handles complex filenames with emojis and special characters, ensuring compatibility across Windows and Linux, and generates clips with embedded subtitles at 720P (configurable) resolution.
 
 ## Features
 - **Keyword-Based Clipping**: Extracts segments where specified keywords appear in subtitles.
@@ -9,7 +9,7 @@ Clipper is a Python-based tool designed to extract video clips from `.mp4` files
 - **Special Character Support**: Safely processes filenames with emojis (e.g., 🔱🐈) and long formats.
 - **Subtitle Embedding**: Embeds adjusted subtitles into clips using FFmpeg.
 - **Configurable Buffers**: Adds pre- and post-buffers (default 5s) around matched subtitles.
-- **Resolution Control**: Scales clips to 720p, preserving aspect ratio.
+- **Resolution Control**: Scales clips to 720P, preserving aspect ratio.
 - **Parallel Processing**: Supports multi-threaded processing via a configurable thread pool.
 - **Flexible Configuration**: Uses a JSON config file for settings.
 
