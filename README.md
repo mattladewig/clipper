@@ -15,6 +15,8 @@ Clipper is a Python-based tool designed to extract video clips from `.mp4` files
 
 ## TODO
 - [ ] Add S2T (Speech-to-Text) subtitle creation for videos without subtitles
+- [ ] Add output resolution control to config file
+- [ ] Add output content control flags in config file; video, audio, subtitles, metadata
 - [ ] Add support for multiple subtitle formats
 - [ ] Add support for multiple video formats
 - [ ] Add support for multiple audio formats
