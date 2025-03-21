@@ -1,151 +1,127 @@
 # Clipper
 
-Clipper is a Python script that processes video files by clipping segments based on keywords found in accompanying subtitle files. The script generates various outputs including clipped video, audio, subtitles, a frame image, and metadata.
+Clipper is a Python-based tool designed to extract video clips from `.mp4` files based on keywords found in corresponding `.srt` subtitle files. It processes videos, identifies subtitle ranges containing specified keywords, and generates clips with embedded subtitles at a fixed 404x720 resolution. Output filenames reflect all matched keywords within each clip’s subtitle range, making it easy to identify content.
 
 ## Features
+- **Keyword-Based Clipping**: Extracts video segments where specified keywords appear in subtitles.
+- **Multi-Keyword Filenames**: Output filenames include all unique keywords found in a clip’s subtitle range (e.g., `2-big_copper_001_111.mp4`).
+- **Subtitle Embedding**: Embeds adjusted subtitles into each clip using FFmpeg.
+- **Configurable Buffers**: Adds pre- and post-buffers (default 5 seconds) around matched subtitle timings.
+- **Resolution Control**: Scales clips to 404x720 while preserving aspect ratio.
+- **Parallel Processing**: Supports multi-threaded video processing via a configurable thread pool.
+- **Flexible Configuration**: Uses a JSON config file for keywords, directories, and settings.
 
-- Clips video files based on keywords found in subtitle files.
-- Configurable pre and post duration for clips.
-- Generates a new folder with clipped video files.
-- Outputs include:
-  - Clipped video (`.mp4`)
-  - Frame image (`.png`)
-  - Audio (`.mp3`)
-  - Subtitles (`.srt`)
-  - Metadata (`.json`)
+## Requirements
+- Python 3.6+
+- FFmpeg (installed and accessible in your PATH)
+- Required Python packages:
+  - `srt`
+  - `tqdm`
+  - Install via: `pip install -r requirements.txt`
 
-## Functional Requirements
-
-1. Process all .mp4 files in the input folder.
-2. Each .mp4 file should have a corresponding .srt file with the same name.
-3. If the .srt file is missing, log a warning and skip the video file.
-4. Search for specified keywords in the .srt files.
-5. If a keyword is found, extract a clip from the video.
-6. Search of keyword should use a fuzzy search matching and provide for a configurable match threshold.
-7. The clip should start at a specified number of seconds before the keyword's timestamp.
-8. The clip should end at a specified number of seconds after the keyword's timestamp.
-9. Sanitize filenames to remove non-ASCII characters and replace spaces with underscores.
-10.  Extract a frame from the video at the keyword's timestamp.
-11.  Extract audio from the video for the duration of the clip.
-12.  Extract subtitles from the .srt file for the duration of the clip.
-13.  Save the extracted clip, frame, audio, and subtitles to the output folder.
-14.  Save metadata about the clip to a .json file.
-15.  Save the center point and keyword to a .txt file.
-16.  Log errors, info and warnings encountered during processing.
-17.  Accept command-line arguments for input folder, output folder, keywords, pre-duration, and post-duration.
-18.  Create the output folder if it does not exist.
-19.  Verify the source .mp4 and .srt duration in seconds are roughly equal.
-20.  Search for possessive forms of proper nouns such as Names. For example, if the keyword is "John", also search for "John's".
-21.  Search for Present participle forms of verbs. For example, if the keyword is "run", also search for "running".
-22.  Search for past tense forms of verbs and past tense forms of participles. Example, if the keyword is "fail", then also search for "failed".
-
-## Dependencies
-
-### Setting Up a Python Virtual Environment
-
-It is recommended to use a Python virtual environment to manage dependencies and avoid conflicts with other projects. Follow these steps to set up and activate a virtual environment:
-
-1. **Create a virtual environment**:
-
-   ```sh
+## Installation
+1. **Clone the Repository**:
+   ```bash
+   git clone https://github.com/mattladewig/clipper.git
+   cd clipper
+   ```
+2. **Set Up a Virtual Environment** (optional but recommended):
+   ```bash
    python -m venv .venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
    ```
-
-2. **Activate the virtual environment**:
-
-   - On Windows:
-
-     ```sh
-     .\.venv\Scripts\activate
-     ```
-
-   - On macOS and Linux:
-
-     ```sh
-     source .venv/bin/activate
-     ```
-
-3. **Install the required packages**:
-
-- Python 3.x
-- `ffmpeg` (must be installed and available in the system PATH)
-- `fuzzywuzzy` (for fuzzy keyword matching)
-- `python-Levenshtein` (optional, for improved performance of `fuzzywuzzy`)
-
-Install the required packages using pip and the provided `requirements.txt` file.
-
-    ```sh
-    pip install -r requirements.txt
-    ```
-
-1. **Run the script**:
-
-   ```sh
-   python clipper.py
+3. **Install Dependencies**:
+   ```bash
+   pip install -r requirements.txt
    ```
+4. **Install FFmpeg**:
+   - On Ubuntu: `sudo apt install ffmpeg`
+   - On macOS: `brew install ffmpeg`
+   - On Windows: Download from [FFmpeg’s site](https://ffmpeg.org/download.html) and add to PATH.
 
 ## Usage
+1. **Prepare Your Files**:
+   - Place `.mp4` videos and their corresponding `.srt` subtitle files (named identically, e.g., `1.mp4` and `1.srt`) in the `videos/` directory (or configure a custom directory in `config.json`).
 
-### Example Command
+2. **Configure the Tool**:
+   - Edit `config.json` to specify keywords and settings (see [Configuration](#configuration) below).
+   - Example `config.json`:
+     ```json
+     {
+       "directory": "videos",
+       "output_dir": "clips",
+       "keywords": ["big", "copper"],
+       "word_alt_map": {},
+       "pre_buffer": 5.0,
+       "post_buffer": 5.0,
+       "max_workers": 2,
+       "use_subdirs": false,
+       "logging": "INFO"
+     }
+     ```
 
-```sh
-python clipper.py
+3. **Run the Script**:
+   ```bash
+   python clipper.py --config config.json
+   ```
+   - Add `--verbose` for debug-level logging: `python clipper.py --config config.json --verbose`.
+
+4. **Output**:
+   - Clips are saved in the `clips/` directory (or as configured), named like `videoID-keywords_clipNumber_startTime.mp4` (e.g., `2-big_copper_001_111.mp4`).
+
+## Configuration
+The `config.json` file supports the following options:
+- **`directory`**: Input directory for `.mp4` and `.srt` files (default: `"videos"`).
+- **`output_dir`**: Output directory for clipped videos (default: `"clips"`).
+- **`keywords`**: List of keywords to search for in subtitles (e.g., `["big", "copper"]`).
+- **`word_alt_map`**: Dictionary of keyword aliases (e.g., `{"big": ["large", "huge"]}`). Optional.
+- **`pre_buffer`**: Seconds added before each matched subtitle (default: `5.0`).
+- **`post_buffer`**: Seconds added after each matched subtitle (default: `5.0`).
+- **`max_workers`**: Number of threads for parallel processing (default: `1`).
+- **`use_subdirs`**: If `true`, creates subdirectories per video ID in the output directory (default: `false`).
+- **`logging`**: Logging level (`"DEBUG"`, `"INFO"`, `"WARNING"`, `"ERROR"`, default: `"INFO"`).
+
+## Example Output
+Given:
+- `videos/1.mp4` and `videos/1.srt`
+- `videos/2.mp4` and `videos/2.srt`
+- Keywords: `["big", "copper"]`
+
+Running `python clipper.py --config config.json` might produce:
+```
+clips/1-big_001_11.mp4
+clips/1-big_002_46.mp4
+clips/1-big_003_156.mp4
+clips/1-big_004_185.mp4
+clips/1-copper_005_333.mp4
+clips/2-big_copper_001_111.mp4
 ```
 
-### Example Script Usage
+Each clip:
+- Is scaled to 720p.
+- Contains embedded subtitles adjusted to the clip’s timeline.
+- Has a filename reflecting all keywords in the clip’s subtitle range.
 
-```python
-# Example usage
-input_folder = './mediaSource'
-output_folder = './mediaClipOutput'
-keywords = ['example', 'keyword']
-pre_duration = 10  # seconds
-post_duration = 10  # seconds
+## How It Works
+1. **Subtitle Parsing**: Loads `.srt` files and searches for keywords (case-insensitive).
+2. **Range Merging**: Combines overlapping subtitle ranges with buffers.
+3. **Clip Extraction**: Uses FFmpeg to cut video segments and embed subtitles.
+4. **Naming**: Generates filenames based on all keywords found in the clip’s full subtitle range (`clip_subs_filtered`).
 
-process_videos(input_folder, output_folder, keywords, pre_duration, post_duration)
-```
+## Debugging
+- Use `--verbose` to see detailed logs:
+  ```bash
+  python clipper.py --config config.json --verbose
+  ```
+- Logs include search targets, clip ranges, subtitle contents, and FFmpeg commands.
 
-### Use Cases
-
-1. **Clipping Highlights from Videos**:
-   - Extract highlights from sports events or lectures based on specific keywords.
-2. **Creating Video Summaries**:
-
-   - Generate summaries of long videos by clipping segments around important keywords.
-
-3. **Content Creation**:
-   - Create short clips for social media by extracting segments around trending keywords.
-
-## Output Structure
-
-The output folder will contain files named based on the original video file name and the keyword used to find the center point of the clip along with the centerpoint timestamp. For example:
-
-```sh
-mediaClipOutput/keyword1/
-├── video1_example_00-01-23-456.mp4
-├── video1_example_00-01-23-456.jpg
-├── video1_example_00-01-23-456.mp3
-├── video1_example_00-01-23-456.srt
-└── video1_example_00-01-23-456.json
-```
-
-## Metadata
-
-The `.json` metadata file includes information about the clip:
-
-```json
-{
-  "center_point": "00:01:23,456",
-  "keyword": "example",
-  "start_time": "0:01:13",
-  "duration": 20
-}
-```
+## Contributing
+Feel free to fork the repository, submit issues, or create pull requests on [GitHub](https://github.com/mattladewig/clipper).
 
 ## License
+This project is open-source under the [MIT License](LICENSE).
 
-This project is licensed under the MIT License.
+## Acknowledgments
+- Built with Python, FFmpeg, and the `srt` library.
+- Thanks to contributors and users for feedback!
 
-## Copyright
-
-© 2024 Matt Ladewig
