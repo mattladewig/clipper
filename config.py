@@ -15,6 +15,7 @@ class ClipperConfig(BaseModel):
     pre_buffer: Optional[float]
     post_buffer: Optional[float]
     max_workers: Optional[int]
+    speech_categories: Optional[List[str]]
     use_subdirs: bool = False
 
     @validator("logging")

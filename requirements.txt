@@ -3,4 +3,6 @@ pytest-mock
 pydantic >= 2.10.6
 srt >= 3.5.3
 tqdm >= 4.66.3
-ffmpeg-python
+transformers
+torch
+keyboard

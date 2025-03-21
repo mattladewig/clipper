@@ -1,15 +1,23 @@
 # Clipper
 
-Clipper is a Python-based tool designed to extract video clips from `.mp4` files based on keywords found in corresponding `.srt` subtitle files. It processes videos, identifies subtitle ranges containing specified keywords, and generates clips with embedded subtitles at a fixed 404x720 resolution. Output filenames reflect all matched keywords within each clip’s subtitle range, making it easy to identify content.
+Clipper is a Python-based tool designed to extract video clips from `.mp4` files based on keywords found in corresponding `.srt` subtitle files. It handles complex filenames with emojis and special characters, ensuring compatibility across Windows and Linux, and generates clips with embedded subtitles at 404x720 resolution.
 
 ## Features
-- **Keyword-Based Clipping**: Extracts video segments where specified keywords appear in subtitles.
-- **Multi-Keyword Filenames**: Output filenames include all unique keywords found in a clip’s subtitle range (e.g., `2-big_copper_001_111.mp4`).
-- **Subtitle Embedding**: Embeds adjusted subtitles into each clip using FFmpeg.
-- **Configurable Buffers**: Adds pre- and post-buffers (default 5 seconds) around matched subtitle timings.
-- **Resolution Control**: Scales clips to 404x720 while preserving aspect ratio.
-- **Parallel Processing**: Supports multi-threaded video processing via a configurable thread pool.
-- **Flexible Configuration**: Uses a JSON config file for keywords, directories, and settings.
+- **Keyword-Based Clipping**: Extracts segments where specified keywords appear in subtitles.
+- **NLP based Speech Category Clipping**: Uses NLP to find and clip one or more specific category of speech from in subtitles.
+- **Multi-Keyword Filenames**: Output filenames include all unique keywords in a clip’s subtitle range (e.g., `big_copper`).
+- **Special Character Support**: Safely processes filenames with emojis (e.g., 🔱🐈) and long formats.
+- **Subtitle Embedding**: Embeds adjusted subtitles into clips using FFmpeg.
+- **Configurable Buffers**: Adds pre- and post-buffers (default 5s) around matched subtitles.
+- **Resolution Control**: Scales clips to 720p, preserving aspect ratio.
+- **Parallel Processing**: Supports multi-threaded processing via a configurable thread pool.
+- **Flexible Configuration**: Uses a JSON config file for settings.
+
+## TODO
+- [ ] Add S2T (Speech-to-Text) subtitle creation for videos without subtitles
+- [ ] Add support for multiple subtitle formats
+- [ ] Add support for multiple video formats
+- [ ] Add support for multiple audio formats
 
 ## Requirements
 - Python 3.6+
@@ -56,7 +64,8 @@ Clipper is a Python-based tool designed to extract video clips from `.mp4` files
        "post_buffer": 5.0,
        "max_workers": 2,
        "use_subdirs": false,
-       "logging": "INFO"
+       "logging": "INFO",
+       "speech_categories": [ ],
      }
      ```
 
@@ -80,6 +89,7 @@ The `config.json` file supports the following options:
 - **`max_workers`**: Number of threads for parallel processing (default: `1`).
 - **`use_subdirs`**: If `true`, creates subdirectories per video ID in the output directory (default: `false`).
 - **`logging`**: Logging level (`"DEBUG"`, `"INFO"`, `"WARNING"`, `"ERROR"`, default: `"INFO"`).
+- **`speech_categories`**: List of speech categories to search for in subtitles (e.g., `["narration", "dialogue"]`). Optional, slow.
 
 ## Example Output
 Given:
@@ -108,8 +118,13 @@ Each clip:
 3. **Clip Extraction**: Uses FFmpeg to cut video segments and embed subtitles.
 4. **Naming**: Generates filenames based on all keywords found in the clip’s full subtitle range (`clip_subs_filtered`).
 
+### Controls
+- q: Exits, tmp/ empties.
+- p: Pauses, logs "Pausing processing...".
+- r: Resumes, logs "Resuming processing...".
+
 ## Debugging
-- Use `--verbose` to see detailed logs:
+- Use `--verbose` to see detailed logs, or set logging to DEBUG in config file.
   ```bash
   python clipper.py --config config.json --verbose
   ```
@@ -122,6 +137,6 @@ Feel free to fork the repository, submit issues, or create pull requests on [Git
 This project is open-source under the [MIT License](LICENSE).
 
 ## Acknowledgments
-- Built with Python, FFmpeg, and the `srt` library.
+- Built with Python, FFmpeg, Hugging Face Transformers, and the `srt` library.
 - Thanks to contributors and users for feedback!
 
