@@ -48,3 +48,4 @@ word_alt_map.py
 keywords
 tmp/*
 tests/test.srt
+config.json
