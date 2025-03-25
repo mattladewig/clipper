@@ -8,17 +8,9 @@
             "program": "clipper.py",
             "console": "integratedTerminal",
             "args": [
-                "-s",
-                "/mnt/d/video_processing/clipper/source",
-                "-o",
-                "/mnt/d/video_processing/clipper/output",
-                "-p",
-                "10",
-                "-d",
-                "15",
-                "-f",
-                "keywords",
-                "--debug"
+                "--config",
+                "config.json",
+                "--verbose"
             ]
         },
         {

@@ -43,6 +43,7 @@ Clipper is a Python-based tool designed to extract video clips from `.mp4` files
 3. **Install Dependencies**:
    ```bash
    pip install -r requirements.txt
+   python -m spacy download en_core_web_sm
    ```
 4. **Install FFmpeg**:
    - On Ubuntu: `sudo apt install ffmpeg`

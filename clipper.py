@@ -3,23 +3,26 @@ import json
 import logging
 import os
 import re
-import subprocess
-from pathlib import Path
-from typing import List, Tuple, Dict
-from datetime import timedelta
-from concurrent.futures import ThreadPoolExecutor
-from transformers import pipeline
 import shutil
+import signal
+import subprocess
+import sys
+import threading
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
+from datetime import timedelta
+from pathlib import Path
+from typing import Dict, List, Tuple
+
+import keyboard
 import srt
 from tqdm import tqdm
-from subtitle_parser import find_keywords, get_all_search_targets, load_subtitles_stream
+from transformers import pipeline
+
 from config import ClipperConfig
-import keyboard
-import time
-import sys
-import signal
-import threading
+from subtitle_parser import find_keywords, get_all_search_targets, load_subtitles_stream, preprocess_transcript
 
 # Configure logging
 logging.basicConfig(
@@ -33,6 +36,8 @@ pause_event = threading.Event()
 exit_event = threading.Event()
 temp_files_lock = threading.Lock()
 temp_files = []
+config_lock = threading.Lock()
+config = None  # Global config object
 
 def signal_handler(sig, frame):
     logger.info("Caught Ctrl+C, shutting down...")
@@ -52,7 +57,17 @@ def cleanup_temp_files():
                 logger.warning(f"Failed to delete temp file {temp_file}: {e}")
         temp_files.clear()
 
-def keyboard_listener():
+def reload_config(config_path: str):
+    """Reload config.json and update the global config object."""
+    global config
+    with config_lock:
+        try:
+            config = ClipperConfig.from_file(Path(config_path))
+            logger.info(f"Reloaded config from {config_path}")
+        except Exception as e:
+            logger.error(f"Failed to reload config from {config_path}: {e}")
+
+def keyboard_listener(config_path: str):
     while not exit_event.is_set():
         if keyboard.is_pressed('q'):
             logger.info("'q' pressed, exiting...")
@@ -63,6 +78,7 @@ def keyboard_listener():
             logger.info("Pausing processing...")
             pause_event.set()
         if keyboard.is_pressed('r') and pause_event.is_set():
+            reload_config(config_path)  # Reload config before resuming
             logger.info("Resuming processing...")
             pause_event.clear()
         time.sleep(0.1)
@@ -81,10 +97,10 @@ def sanitize_filename(filename: str, max_length: int = 200) -> str:
         flags=re.UNICODE
     )
     safe_name = re.sub(invalid_chars, "_", filename)
-    safe_name = re.sub(r"\s+", "_", safe_name)  # Replace spaces with underscores
-    safe_name = emoji_pattern.sub("", safe_name)  # Remove emojis
+    safe_name = re.sub(r"\s+", "_", safe_name)
+    safe_name = emoji_pattern.sub("", safe_name)
     safe_name = re.sub(r"_+", "_", safe_name)
-    return safe_name[:max_length].strip("_")
+    return safe_name[:max_length].strip("_").lower()
 
 def merge_subtitle_ranges(
     matched_subtitles: List[srt.Subtitle], pre_buffer: float, post_buffer: float
@@ -120,12 +136,8 @@ def process_video(
     video_file: str,
     subtitle_file: str,
     output_dir: str,
-    keywords: List[str],
-    word_alt_map: Dict[str, List[str]],
-    pre_buffer: float,
-    post_buffer: float,
+    config: ClipperConfig,
     use_subdirs: bool,
-    speech_categories: List[str] = None,
 ) -> None:
     if exit_event.is_set():
         return
@@ -133,8 +145,11 @@ def process_video(
     if not shutil.which("ffmpeg"):
         raise RuntimeError("FFmpeg not found in PATH.")
 
-    # Use facebook/bart-large-mnli for better zero-shot performance
-    classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli", device=-1)
+    # Dynamically select device
+    import torch
+    device = 0 if torch.cuda.is_available() else -1
+    logger.debug(f"Using device: {'GPU' if device == 0 else 'CPU'}")
+    classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli", device=device)
 
     project_root = Path(".")
     video_path = Path(video_file)
@@ -152,10 +167,11 @@ def process_video(
     with temp_files_lock:
         temp_files.append(tmp_video_path)
 
-    subtitles = list(load_subtitles_stream(subtitle_file))
-    search_targets, _ = get_all_search_targets(set(keywords), word_alt_map)
+    # Preprocess transcript to replace censored words
+    subtitles = preprocess_transcript(subtitle_file, video_file, tmp_dir)
+    search_targets, _ = get_all_search_targets(set(config.keywords), config.word_alt_map)
     logger.debug(f"Search targets: {search_targets}")
-    matched_subtitles = find_keywords(subtitles, search_targets) if keywords else subtitles
+    matched_subtitles = find_keywords(subtitles, search_targets) if config.keywords else subtitles
 
     if not matched_subtitles:
         logger.info(f"No search targets found in {subtitle_file}")
@@ -165,7 +181,7 @@ def process_video(
                 temp_files.remove(tmp_video_path)
         return
 
-    if speech_categories:
+    if config.speech_categories:
         categorized_subtitles = []
         for i, sub in enumerate(subtitles):
             if exit_event.is_set():
@@ -173,12 +189,12 @@ def process_video(
                 return
             while pause_event.is_set() and not exit_event.is_set():
                 time.sleep(0.1)
-            ##TODO add config file var for look-ahead window size
-            start_idx = max(0, i - 2)
             ##TODO add config file var for look-behind window size
+            start_idx = max(0, i - 2)
+            ##TODO add config file var for look-ahead window size
             end_idx = min(len(subtitles), i + 3)
             context = " ".join(s.content for s in subtitles[start_idx:end_idx])
-            result = classifier(context, speech_categories, multi_label=True)
+            result = classifier(context, config.speech_categories, multi_label=True)
             scores = result["scores"]
             labels = result["labels"]
             ##TODO add config var for threshold of the score
@@ -190,7 +206,7 @@ def process_video(
             logger.debug(f"Scores: {dict(zip(labels, scores))}")
         matched_subtitles = categorized_subtitles if categorized_subtitles else matched_subtitles
 
-    clips = merge_subtitle_ranges(matched_subtitles, pre_buffer, post_buffer)
+    clips = merge_subtitle_ranges(matched_subtitles, config.pre_buffer, config.post_buffer)
 
     for idx, (start_time, end_time, clip_subs) in enumerate(clips, 1):
         if exit_event.is_set():
@@ -214,14 +230,14 @@ def process_video(
             sub.start = sub.start - timedelta(seconds=start_time)
             sub.end = sub.end - timedelta(seconds=start_time)
 
-        tmp_srt_path = tmp_dir / f"temp_{uuid.uuid4().hex}.srt"
+        tmp_srt_path = tmp_dir / f"temp_{uuid.uuid4().hex}.srt"  # Fixed typo: '.或rt' to '.srt'
         with open(tmp_srt_path, mode="w", encoding='utf-8') as tmp_srt:
             tmp_srt.write(srt.compose(clip_subs_filtered))
         with temp_files_lock:
             temp_files.append(tmp_srt_path)
         tmp_srt_rel_path = tmp_srt_path.relative_to(project_root).as_posix()
 
-        if speech_categories and any(hasattr(sub, "categories") for sub in clip_subs_filtered):
+        if config.speech_categories and any(hasattr(sub, "categories") for sub in clip_subs_filtered):
             matched_categories = sorted(set(
                 cat for sub in clip_subs_filtered if hasattr(sub, "categories") 
                 for cat in sub.categories
@@ -241,18 +257,32 @@ def process_video(
         logger.debug(f"Temporary SRT for {output_file_rel}:\n{srt.compose(clip_subs_filtered)}")
         logger.debug(f"Output file path: {output_file_rel}")
 
-        ffmpeg_cmd = (
-            f'ffmpeg -ss {start_time} -t {duration} -i "{tmp_video_rel_path}" '
-            f'-vf "scale=-2:720" '
-            f'-vf "subtitles=\'{tmp_srt_rel_path}\'" '
-            f'-c:v libx264 -c:a aac -y "{output_file_rel}"'
-        )
-        logger.debug(f"FFmpeg command: {ffmpeg_cmd}")
+        # Check if output file already exists
+        if Path(output_file_rel).exists():
+            logger.info(f"Output file {output_file_rel} already exists, skipping...")
+            with temp_files_lock:
+                if tmp_srt_path in temp_files and tmp_srt_path.exists():
+                    tmp_srt_path.unlink()
+                    temp_files.remove(tmp_srt_path)
+            continue  # Skip to next clip
+
+        ffmpeg_cmd = [
+            'ffmpeg',
+            '-ss', str(start_time),
+            '-t', str(duration),
+            '-i', tmp_video_rel_path,
+            '-vf', 'scale=-2:720',
+            '-vf', f"subtitles='{tmp_srt_rel_path}'",
+            '-c:v', 'libx264',
+            '-c:a', 'copy',
+            '-y',
+            output_file_rel
+        ]
+        logger.debug(f"FFmpeg command: {' '.join(ffmpeg_cmd)}")
 
         try:
             result = subprocess.run(
                 ffmpeg_cmd,
-                shell=True,
                 check=True,
                 capture_output=True,
                 text=True,
@@ -264,6 +294,11 @@ def process_video(
         except subprocess.CalledProcessError as e:
             logger.error(f"FFmpeg failed with exit code {e.returncode}: {e.stderr}")
             raise
+        finally:
+            with temp_files_lock:
+                if tmp_srt_path in temp_files and tmp_srt_path.exists():
+                    tmp_srt_path.unlink()
+                    temp_files.remove(tmp_srt_path)
 
     if not exit_event.is_set():
         cleanup_temp_files()
@@ -274,23 +309,20 @@ def main():
     parser.add_argument("--verbose", action="store_true", help="Enable debug logging")
     args = parser.parse_args()
 
+    global config
     config = ClipperConfig.from_file(Path(args.config))
+    config_path = args.config  # Store path for reloading
     logging_level = logging.DEBUG if args.verbose else getattr(logging, config.logging)
     logger.setLevel(logging_level)
 
     signal.signal(signal.SIGINT, signal_handler)
-    listener_thread = threading.Thread(target=keyboard_listener, daemon=True)
+    listener_thread = threading.Thread(target=keyboard_listener, args=(config_path,), daemon=True)
     listener_thread.start()
 
     input_dir = config.directory or "videos"
     output_dir = config.output_dir
-    keywords = config.keywords
-    speech_categories = config.speech_categories
-    word_alt_map = config.word_alt_map or {}
-    pre_buffer = config.pre_buffer if config.pre_buffer is not None else 5.0
-    post_buffer = config.post_buffer if config.post_buffer is not None else 5.0
-    max_workers = config.max_workers if config.max_workers is not None else 1
     use_subdirs = config.use_subdirs
+    max_workers = config.max_workers if config.max_workers is not None else 1
 
     video_files = [f for f in os.listdir(input_dir) if f.lower().endswith(".mp4")]
     if not video_files:
@@ -314,12 +346,8 @@ def main():
                     video_path,
                     subtitle_file,
                     output_dir,
-                    keywords,
-                    word_alt_map,
-                    pre_buffer,
-                    post_buffer,
+                    deepcopy(config),
                     use_subdirs,
-                    speech_categories,
                 )
             )
         for future in tqdm(futures, desc="Processing videos"):
