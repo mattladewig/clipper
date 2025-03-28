@@ -11,3 +11,4 @@ regex>=2023.12.25
 nltk>=3.8.1
 spacy>=3.7.6
 librosa>=0.10.2  # For audio preprocessing
+fuzzywuzzy[speedup]

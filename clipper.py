@@ -167,7 +167,16 @@ def process_video(
     with temp_files_lock:
         temp_files.append(tmp_video_path)
 
-    # Preprocess transcript to replace censored words
+    # Get video duration
+    duration_cmd = ["ffprobe", "-i", str(video_path), "-show_entries", "format=duration", "-v", "quiet", "-of", "csv=p=0"]
+    try:
+        video_duration = float(subprocess.run(duration_cmd, check=True, capture_output=True, encoding="utf-8").stdout.strip())
+        logger.debug(f"Video duration: {video_duration}s")
+    except (subprocess.CalledProcessError, ValueError) as e:
+        logger.error(f"Failed to get video duration for {video_file}: {e}")
+        raise
+
+    # Preprocess transcript
     subtitles = preprocess_transcript(subtitle_file, video_file, tmp_dir)
     search_targets, _ = get_all_search_targets(set(config.keywords), config.word_alt_map)
     logger.debug(f"Search targets: {search_targets}")
@@ -181,6 +190,7 @@ def process_video(
                 temp_files.remove(tmp_video_path)
         return
 
+    subtitle_categories = {}
     if config.speech_categories:
         categorized_subtitles = []
         for i, sub in enumerate(subtitles):
@@ -189,18 +199,15 @@ def process_video(
                 return
             while pause_event.is_set() and not exit_event.is_set():
                 time.sleep(0.1)
-            ##TODO add config file var for look-behind window size
             start_idx = max(0, i - 2)
-            ##TODO add config file var for look-ahead window size
             end_idx = min(len(subtitles), i + 3)
             context = " ".join(s.content for s in subtitles[start_idx:end_idx])
             result = classifier(context, config.speech_categories, multi_label=True)
             scores = result["scores"]
             labels = result["labels"]
-            ##TODO add config var for threshold of the score
             detected_categories = [label for label, score in zip(labels, scores) if score > 0.9]
             if detected_categories:
-                sub.categories = detected_categories
+                subtitle_categories[sub.index] = detected_categories
                 categorized_subtitles.append(sub)
             logger.debug(f"Subtitle: '{sub.content}' | Context: '{context}' | Categories: {detected_categories}")
             logger.debug(f"Scores: {dict(zip(labels, scores))}")
@@ -215,10 +222,17 @@ def process_video(
         while pause_event.is_set() and not exit_event.is_set():
             time.sleep(0.1)
 
-        duration = end_time - start_time
+        # Clamp timings to video duration
+        if start_time >= video_duration:
+            logger.warning(f"Clip {idx} start time {start_time}s exceeds video duration {video_duration}s, skipping")
+            continue
+        duration = min(end_time, video_duration) - start_time
+        if duration <= 0:
+            logger.warning(f"Clip {idx} has invalid duration ({duration}s) at {start_time}-{end_time}, skipping")
+            continue
         if start_time < 0:
             start_time = 0
-            duration = end_time
+            duration = min(end_time, video_duration)
 
         clip_subs_filtered = [
             sub for sub in subtitles
@@ -230,17 +244,27 @@ def process_video(
             sub.start = sub.start - timedelta(seconds=start_time)
             sub.end = sub.end - timedelta(seconds=start_time)
 
-        tmp_srt_path = tmp_dir / f"temp_{uuid.uuid4().hex}.srt"  # Fixed typo: '.或rt' to '.srt'
+        tmp_srt_path = tmp_dir / f"temp_{uuid.uuid4().hex}.srt"
         with open(tmp_srt_path, mode="w", encoding='utf-8') as tmp_srt:
-            tmp_srt.write(srt.compose(clip_subs_filtered))
+            cleaned_subs = [
+                srt.Subtitle(
+                    index=sub.index,
+                    start=sub.start,
+                    end=sub.end,
+                    content=sub.content,
+                    proprietary=sub.proprietary if hasattr(sub, 'proprietary') else ''
+                )
+                for sub in clip_subs_filtered
+            ]
+            tmp_srt.write(srt.compose(cleaned_subs))
         with temp_files_lock:
             temp_files.append(tmp_srt_path)
         tmp_srt_rel_path = tmp_srt_path.relative_to(project_root).as_posix()
 
-        if config.speech_categories and any(hasattr(sub, "categories") for sub in clip_subs_filtered):
+        if config.speech_categories and any(sub.index in subtitle_categories for sub in clip_subs_filtered):
             matched_categories = sorted(set(
-                cat for sub in clip_subs_filtered if hasattr(sub, "categories") 
-                for cat in sub.categories
+                cat for sub in clip_subs_filtered if sub.index in subtitle_categories
+                for cat in subtitle_categories[sub.index]
             ))
             categories_str = "_".join(matched_categories) if matched_categories else "uncategorized"
         else:
@@ -254,25 +278,24 @@ def process_video(
         safe_output_name = sanitize_filename(base_output_name)
         output_file = output_subdir / f"{safe_output_name}.mp4"
         output_file_rel = output_file.relative_to(project_root).as_posix()
-        logger.debug(f"Temporary SRT for {output_file_rel}:\n{srt.compose(clip_subs_filtered)}")
+        logger.debug(f"Temporary SRT for {output_file_rel}:\n{srt.compose(cleaned_subs)}")
         logger.debug(f"Output file path: {output_file_rel}")
 
-        # Check if output file already exists
         if Path(output_file_rel).exists():
             logger.info(f"Output file {output_file_rel} already exists, skipping...")
             with temp_files_lock:
                 if tmp_srt_path in temp_files and tmp_srt_path.exists():
                     tmp_srt_path.unlink()
                     temp_files.remove(tmp_srt_path)
-            continue  # Skip to next clip
+            continue
 
+        # Combine video filters into one -vf option
         ffmpeg_cmd = [
             'ffmpeg',
             '-ss', str(start_time),
             '-t', str(duration),
             '-i', tmp_video_rel_path,
-            '-vf', 'scale=-2:720',
-            '-vf', f"subtitles='{tmp_srt_rel_path}'",
+            '-vf', f"scale=-2:720,subtitles='{tmp_srt_rel_path}'",
             '-c:v', 'libx264',
             '-c:a', 'copy',
             '-y',
@@ -292,7 +315,7 @@ def process_video(
             logger.debug(f"FFmpeg stdout: {result.stdout}")
             logger.info(f"Clipped video with embedded subtitles saved to {output_file_rel}")
         except subprocess.CalledProcessError as e:
-            logger.error(f"FFmpeg failed with exit code {e.returncode}: {e.stderr}")
+            logger.error(f"FFmpeg failed with exit code {e.returncode}: stdout='{e.stdout}', stderr='{e.stderr}'")
             raise
         finally:
             with temp_files_lock:
