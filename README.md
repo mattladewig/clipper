@@ -67,7 +67,7 @@ Clipper is a Python-based tool designed to extract video clips from `.mp4` files
        "max_workers": 2,
        "use_subdirs": false,
        "logging": "INFO",
-       "speech_categories": [ ],
+       "speech_categories": [ ]
      }
      ```
 
